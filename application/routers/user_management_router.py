@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from ..models import application_models as models
 from typing import Annotated
 from shared.database import engine, get_db
 from sqlalchemy.orm import Session
-from datetime import datetime, date
+from datetime import datetime
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -18,7 +18,7 @@ class UserBase(BaseModel):
     user_created_at: datetime = Field(default_factory=datetime.now)
     nutricionist_id_FK: int
 
-    @validator("user_created_at", pre=True, always=True)
+    @field_validator("user_created_at")
     def parse_user_created_at(cls, value):
         if isinstance(value, datetime):
             return value
@@ -35,7 +35,7 @@ class NutricionistBase(BaseModel):
     nutricionist_phone: str
     nutricionist_created_at: datetime = Field(default_factory=datetime.now)
 
-    @validator("nutricionist_created_at", pre=True, always=True)
+    @field_validator("nutricionist_created_at")
     def parse_nutricionist_created_at(cls, value):
         if isinstance(value, datetime):
             return value

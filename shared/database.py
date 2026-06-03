@@ -13,7 +13,15 @@ load_dotenv(dotenv_path=env_path)
 
 SQLALCHEMY_DATABASE_URL = os.getenv("SQLALCHEMY_DATABASE_URL")
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+if not SQLALCHEMY_DATABASE_URL:
+    raise RuntimeError("SQLALCHEMY_DATABASE_URL nao foi definida no arquivo .env")
+
+os.environ.setdefault("PGCLIENTENCODING", "UTF8")
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"client_encoding": "utf8"},
+)
 
 SessionLocal = sessionmaker(autoflush=False, autocommit=False, bind=engine)
 Base = declarative_base()
@@ -35,9 +43,9 @@ def create_table():
 
     print(f"\nCriando {len(Base.metadata.tables)} tabelas...")
     Base.metadata.create_all(bind=engine)
-    print("✅ Tabelas criadas!")
+    print("Tabelas criadas!")
 
 # Chama create_table() apenas quando o script é executado diretamente
 if __name__ == "__main__":
     create_table()
-    print("✅ Banco de dados criado com sucesso!")
+    print("Banco de dados criado com sucesso!")

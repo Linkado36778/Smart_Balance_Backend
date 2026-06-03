@@ -40,10 +40,6 @@ class Nutricionist(Base):
     nutricionist_phone = Column(String, index=True)
     nutricionist_email = Column(String, index=True) 
 
-    #Relationships
-    nutricionist_user_rl = relationship("User", back_populates="user_nutricionist_rl")
-
-
 class Allergen(Base):
     __tablename__ = "Alergeno"
 
@@ -65,11 +61,10 @@ class User(Base):
     user_height_m = Column(Float, index=True)
     user_sex = Column(Boolean, index=True)
     user_created_at = Column(DateTime, index=True)
-    nutricionist_id_FK = Column(Integer, ForeignKey("Nutricionista.nutricionist_id"), index=True)
+    nutricionist_id_FK = Column(Integer, index=True)
 
     #Relationships
     user_allergen_rl = relationship("Allergen", secondary=user_allergen_association, back_populates="allergen_user_rl")
-    user_nutricionist_rl = relationship("Nutricionist", back_populates="nutricionist_user_rl", uselist=False)
     user_meal_rl = relationship("Meal", back_populates="meal_user_rl")
 
 
@@ -92,7 +87,7 @@ class Food(Base):
     food_id = Column(Integer, primary_key=True, index=True)
     food_name = Column(String, index=True)
     category_name = Column(String, index=True)
-    brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"),index=True)
+    brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"), index=True)
 
     #Relationships
     food_meal_rl = relationship("Meal", secondary=meal_food_association, back_populates="meal_food_rl")
