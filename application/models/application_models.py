@@ -21,7 +21,9 @@ food_nutrient_association = Table(
     'Alimento_Nutriente',
     Base.metadata,
     Column('nutrient_id_FK', Integer, ForeignKey('Nutriente.nutrient_id'), primary_key=True),
-    Column('food_id_FK1', Integer, ForeignKey('Alimento.food_id'), primary_key=True)
+    Column('food_id_FK1', Integer, ForeignKey('Alimento.food_id'), primary_key=True),
+    Column('food_nutrient_type', JSON),
+    Column('food_nutrient_amount', JSON)
 )
 
 allergen_food_association = Table(
@@ -96,8 +98,6 @@ class Food(Base):
     food_id = Column(Integer, primary_key=True, index=True)
     food_name = Column(String, index=True)
     category_id_FK = Column(Integer, ForeignKey("Categoria.category_id"), index=True, nullable=True)
-    food_nutrient_type = Column(JSON)
-    food_nutrient_amount = Column(JSON)
     brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"), index=True, nullable=True)
 
     #Relationships
