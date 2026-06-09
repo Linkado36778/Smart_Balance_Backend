@@ -13,7 +13,7 @@ class UserBase(BaseModel):
     user_birthdate: str
     user_weight_kg: float
     user_height_m: float
-    user_sex: bool
+    user_sex: str
     user_password: str
     user_created_at: datetime = Field(default_factory=datetime.now)
     nutricionist_id_FK: Optional[int] = None
