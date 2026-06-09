@@ -1,5 +1,5 @@
 from shared.database import Base
-from sqlalchemy import DateTime, Boolean, Float, Date, Integer, Column, String, ForeignKey, Table
+from sqlalchemy import DateTime, Boolean, Float, Date, Integer, Column, String, ForeignKey, JSON, Table
 from sqlalchemy.orm import relationship
 
 # Association tables for many-to-many relationships
@@ -72,6 +72,10 @@ class Meal(Base):
     __tablename__ = "Refeicao"
 
     meal_id = Column(Integer, primary_key=True, index=True)
+    meal_name = Column(String, index=True)
+    meal_items = Column(JSON)
+    meal_calories = Column(Float, index=True)
+    meal_nutrients = Column(JSON)
     weight_g = Column(Float, index=True)   
     consumed_at = Column(Date, index=True)
     user_id_FK2 = Column(Integer, ForeignKey("Usuario.user_id"), index=True)
@@ -87,6 +91,10 @@ class Food(Base):
     food_id = Column(Integer, primary_key=True, index=True)
     food_name = Column(String, index=True)
     category_name = Column(String, index=True)
+    food_calories = Column(Float, index=True)
+    food_weight_g_ml = Column(Float, index=True)
+    food_nutrient_type = Column(JSON)
+    food_nutrient_amount = Column(JSON)
     brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"), index=True)
 
     #Relationships
