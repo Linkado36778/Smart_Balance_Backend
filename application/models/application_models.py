@@ -59,7 +59,7 @@ class User(Base):
     user_birthdate = Column(Date, index=True)
     user_weight_kg = Column(Float, index=True)
     user_height_m = Column(Float, index=True)
-    user_sex = Column(Boolean, index=True)
+    user_sex = Column(String, index=True)
     user_created_at = Column(DateTime, index=True)
     nutricionist_id_FK = Column(Integer, ForeignKey("Nutricionista.nutricionist_id"), index=True, nullable=True)
 
