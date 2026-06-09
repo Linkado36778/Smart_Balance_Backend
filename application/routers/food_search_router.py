@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from unicodedata import normalize
 
-router = APIRouter(prefix="/food_search", tags=["food_search"])
+router = APIRouter(prefix="/", tags=["food_search"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
