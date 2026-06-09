@@ -21,7 +21,7 @@ food_nutrient_association = Table(
     'Alimento_Nutriente',
     Base.metadata,
     Column('nutrient_id_FK', Integer, ForeignKey('Nutriente.nutrient_id'), primary_key=True),
-    Column('food_id_FK1', Integer, ForeignKey('Alimento.food_id'))
+    Column('food_id_FK1', Integer, ForeignKey('Alimento.food_id'), primary_key=True)
 )
 
 allergen_food_association = Table(
@@ -81,7 +81,8 @@ class Meal(Base):
     meal_calories = Column(Float, index=True)
     meal_nutrients = Column(JSON)
     weight_g = Column(Float, index=True)   
-    consumed_at_datetime = Column(DateTime, index=True)
+    consumed_at_date = Column(String, index=True)
+    consumed_at_time = Column(String, index=True)
     user_id_FK2 = Column(Integer, ForeignKey("Usuario.user_id"), index=True)
 
     #Relationships
@@ -94,7 +95,7 @@ class Food(Base):
 
     food_id = Column(Integer, primary_key=True, index=True)
     food_name = Column(String, index=True)
-    category_name = Column(String, index=True)
+    category_id_FK = Column(Integer, ForeignKey("Categoria.category_id"), index=True, nullable=True)
     food_nutrient_type = Column(JSON)
     food_nutrient_amount = Column(JSON)
     brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"), index=True, nullable=True)
@@ -102,6 +103,7 @@ class Food(Base):
     #Relationships
     food_meal_rl = relationship("Meal", secondary=meal_food_association, back_populates="meal_food_rl")
     food_brand_rl = relationship("Brand", back_populates="brand_food_rl", uselist=False)
+    food_category_rl = relationship("Category", back_populates="category_food_rl", uselist=False)
     food_nutrient_rl = relationship("Nutrient", secondary=food_nutrient_association, back_populates="nutrient_food_rl")
     food_allergen_rl = relationship("Allergen", secondary=allergen_food_association, back_populates="allergen_food_rl")
 
@@ -122,6 +124,17 @@ class Nutrient(Base):
     nutrient_id = Column(Integer, primary_key=True, index=True)
     nutrient_name = Column(String, index=True)
     nutrient_unit = Column(String, index=True)
+    nutrient_calories_per_unit = Column(Float, index=True, default=0.0)
 
     #Relationships
     nutrient_food_rl = relationship("Food", secondary=food_nutrient_association, back_populates="food_nutrient_rl")
+
+
+class Category(Base):
+    __tablename__ = "Categoria"
+
+    category_id = Column(Integer, primary_key=True, index=True)
+    category_name = Column(String, index=True)
+
+    #Relationships
+    category_food_rl = relationship("Food", back_populates="food_category_rl")

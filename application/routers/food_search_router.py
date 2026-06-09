@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from ..models import application_models as models
-from typing import Annotated, Dict, List, Optional
-from shared.database import engine, get_db
+from typing import Annotated, Dict, List, Optional, Union
+from shared.database import get_db, initialize_database
 from sqlalchemy.orm import Session
 from datetime import datetime
 from unicodedata import normalize
@@ -11,9 +11,9 @@ router = APIRouter(prefix="/food_search", tags=["food_search"])
 
 class FoodBase(BaseModel):
     food_name: str
-    category_name: str
+    category_id_FK: Optional[int] = None
     brand_id_FK: Optional[int] = None
-    food_nutrient_type: List[str]
+    food_nutrient_type: List[Union[int, str]]
     food_nutrient_amount: List[float]
 
 class BrandBase(BaseModel): 
@@ -24,32 +24,42 @@ class MealBase(BaseModel):
     user_id_FK2: int
     meal_items: List[str]
     meal_items_weight_g: List[float]
-    consumed_at: str
-    consumed_at_datetime: datetime = Field(default_factory=datetime.now)
+    consumed_at_date: str
+    consumed_at_time: str = Field(default_factory=lambda: datetime.time().strftime("%H:%M"))
     meal_items_calories: List[float] = Field(default_factory=list)
     meal_items_nutrients: List[List[str]] = Field(default_factory=list)
     meal_items_nutrient_amounts: List[Dict[str, float]] = Field(default_factory=list)
     meal_calories: float = 0.0
     meal_nutrients: Dict[str, float] = Field(default_factory=dict)
 
-    @field_validator("consumed_at_datetime")
-    def parse_consumed_at_datetime(cls, value):
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.strptime(value, "%d/%m/%Y %H:%M:%S")
-            except ValueError:
-                return datetime.fromisoformat(value)
-        return value
-
-models.Base.metadata.create_all(bind=engine)
+initialize_database()
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
+def normalize_text(value: str):
+    return normalize("NFKD", value.strip().lower()).encode("ascii", "ignore").decode("ascii")
+
+def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]):
+    if isinstance(nutrient_identifier, int):
+        return db.query(models.Nutrient).filter(models.Nutrient.nutrient_id == nutrient_identifier).first()
+
+    if isinstance(nutrient_identifier, str) and nutrient_identifier.isdigit():
+        return db.query(models.Nutrient).filter(models.Nutrient.nutrient_id == int(nutrient_identifier)).first()
+
+    normalized_identifier = normalize_text(nutrient_identifier)
+    nutrients = db.query(models.Nutrient).all()
+    return next(
+        (
+            nutrient
+            for nutrient in nutrients
+            if normalize_text(nutrient.nutrient_name) == normalized_identifier
+        ),
+        None,
+    )
+
 @router.get("/search_food")
-def search_food(food_name: str, db: db_dependency):
-    db_food_search = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{food_name}%")).all()
+def search_food(food_id: int, db: db_dependency):
+    db_food_search = db.query(models.Food).filter(models.Food.food_id == food_id).all()
 
     if not db_food_search:
         raise HTTPException(status_code=404, detail="Food not found")
@@ -59,13 +69,33 @@ def search_food(food_name: str, db: db_dependency):
 
 @router.post("/add_food")
 def add_food(food: FoodBase, db: db_dependency):
+    if len(food.food_nutrient_type) != len(food.food_nutrient_amount):
+        raise HTTPException(
+            status_code=400,
+            detail="food_nutrient_type e food_nutrient_amount devem ter o mesmo tamanho"
+        )
+
+    nutrients = []
+    nutrient_ids = []
+    for nutrient_identifier in food.food_nutrient_type:
+        nutrient = get_nutrient_by_identifier(db, nutrient_identifier)
+        if not nutrient:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nutriente '{nutrient_identifier}' nao encontrado"
+            )
+
+        nutrients.append(nutrient)
+        nutrient_ids.append(nutrient.nutrient_id)
+
     db_food = models.Food(
         food_name = food.food_name,
-        category_name = food.category_name,
+        category_id_FK = food.category_id_FK,
         brand_id_FK = food.brand_id_FK,
-        food_nutrient_type = food.food_nutrient_type,
+        food_nutrient_type = nutrient_ids,
         food_nutrient_amount = food.food_nutrient_amount,
     )
+    db_food.food_nutrient_rl = nutrients
 
     db_food_create = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{food.food_name}%")).first()
 
@@ -117,23 +147,6 @@ def meal_calories_nutrient_calculator(meal: MealBase, db: db_dependency):
     meal_items_nutrients = []
     meal_items_nutrient_amounts = []
 
-    calories_by_nutrient = {
-        "carboidrato": 4.0,
-        "carboidratos": 4.0,
-        "carbohydrate": 4.0,
-        "carbohydrates": 4.0,
-        "proteina": 4.0,
-        "proteinas": 4.0,
-        "protein": 4.0,
-        "proteins": 4.0,
-        "gordura": 9.0,
-        "gorduras": 9.0,
-        "lipidio": 9.0,
-        "lipidios": 9.0,
-        "fat": 9.0,
-        "fats": 9.0,
-    }
-
     if len(meal.meal_items) != len(meal.meal_items_weight_g):
         raise HTTPException(
             status_code=400,
@@ -143,21 +156,25 @@ def meal_calories_nutrient_calculator(meal: MealBase, db: db_dependency):
     for item, item_weight_g in zip(meal.meal_items, meal.meal_items_weight_g):
         db_food = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{item}%")).first()
         if db_food:
-            nutrient_types = db_food.food_nutrient_type or []
+            nutrient_ids = db_food.food_nutrient_type or []
             nutrient_amounts = db_food.food_nutrient_amount or []
             item_nutrients = []
             item_nutrient_amounts: Dict[str, float] = {}
             item_calories = 0.0
             weight_ratio = item_weight_g / 100
 
-            for nutrient_type, nutrient_amount in zip(nutrient_types, nutrient_amounts):
-                consumed_amount = (nutrient_amount or 0.0) * weight_ratio
-                item_nutrients.append(nutrient_type)
-                item_nutrient_amounts[nutrient_type] = consumed_amount
-                total_nutrients[nutrient_type] = total_nutrients.get(nutrient_type, 0.0) + consumed_amount
+            for nutrient_id, nutrient_amount in zip(nutrient_ids, nutrient_amounts):
+                nutrient = get_nutrient_by_identifier(db, nutrient_id)
+                if not nutrient:
+                    continue
 
-                nutrient_key = normalize("NFKD", nutrient_type.strip().lower()).encode("ascii", "ignore").decode("ascii")
-                item_calories += consumed_amount * calories_by_nutrient.get(nutrient_key, 0.0)
+                nutrient_name = nutrient.nutrient_name
+                consumed_amount = (nutrient_amount or 0.0) * weight_ratio
+                item_nutrients.append(nutrient_name)
+                item_nutrient_amounts[nutrient_name] = consumed_amount
+                total_nutrients[nutrient_name] = total_nutrients.get(nutrient_name, 0.0) + consumed_amount
+
+                item_calories += consumed_amount * (nutrient.nutrient_calories_per_unit or 0.0)
 
             meal_items_calories.append(item_calories)
             meal_items_nutrients.append(item_nutrients)
@@ -177,24 +194,24 @@ def meal_calories_nutrient_calculator(meal: MealBase, db: db_dependency):
     return add_meal(meal, db)
 
 
-def add_meal(meal: MealBase, db: db_dependency, ):
-    consumed_at = datetime.strptime(meal.consumed_at, "%d/%m/%Y").date()
+def add_meal(meal: MealBase, db: db_dependency):
 
     db_meal = models.Meal(
         meal_name = meal.meal_name,
         user_id_FK2 = meal.user_id_FK2,
         meal_items = meal.meal_items,
-        consumed_at = consumed_at,
-        consumed_at_datetime = meal.consumed_at_datetime,
+        consumed_at_date = meal.consumed_at_date,
+        consumed_at_time = meal.consumed_at_time,
         meal_items_calories = meal.meal_items_calories,
         meal_items_nutrients = meal.meal_items_nutrients,
         meal_calories = meal.meal_calories,
         meal_nutrients = meal.meal_nutrients,
         meal_items_nutrient_amounts = meal.meal_items_nutrient_amounts,
         meal_items_weight_g = meal.meal_items_weight_g,
-        weight_g = sum(meal.meal_items_weight_g),
-        
+        weight_g = sum(meal.meal_items_weight_g),       
     )
+
+    db_meal.consumed_at_date = datetime.strptime(meal.consumed_at_date, "%d/%m/%Y").date()
 
     db.add(db_meal)
     db.commit()
@@ -211,3 +228,16 @@ def get_meal(meal_id: int, db: db_dependency):
         raise HTTPException(status_code=404, detail="Meal not found")
 
     return db_meal
+
+@router.get("/search_category")
+def search_category(db: db_dependency):
+    return db.query(models.Category).order_by(models.Category.category_id).all()
+
+    if not db_category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    return db_category
+
+@router.get("/get_nutrients")
+def get_nutrients(db: db_dependency):
+    return db.query(models.Nutrient).order_by(models.Nutrient.nutrient_id).all()

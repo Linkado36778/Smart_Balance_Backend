@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from ..models import application_models as models
 from typing import Annotated, Optional
-from shared.database import engine, get_db
+from shared.database import get_db, initialize_database
 from sqlalchemy.orm import Session
 from datetime import datetime
 
@@ -46,7 +46,7 @@ class NutricionistBase(BaseModel):
                 return datetime.fromisoformat(value)
         return value
 
-models.Base.metadata.create_all(bind=engine)
+initialize_database()
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
