@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from ..models import application_models as models
-from typing import Annotated
+from typing import Annotated, Optional
 from shared.database import engine, get_db
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -16,7 +16,7 @@ class UserBase(BaseModel):
     user_sex: bool
     user_password: str
     user_created_at: datetime = Field(default_factory=datetime.now)
-    nutricionist_id_FK: int
+    nutricionist_id_FK: Optional[int] = None
 
     @field_validator("user_created_at")
     def parse_user_created_at(cls, value):

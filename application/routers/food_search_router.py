@@ -1,20 +1,20 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from ..models import application_models as models
-from typing import Annotated, Dict, List
+from typing import Annotated, Dict, List, Optional
 from shared.database import engine, get_db
 from sqlalchemy.orm import Session
+from datetime import datetime
+from unicodedata import normalize
 
 router = APIRouter(prefix="/food_search", tags=["food_search"])
 
 class FoodBase(BaseModel):
     food_name: str
     category_name: str
-    brand_id_FK: int
+    brand_id_FK: Optional[int] = None
     food_nutrient_type: List[str]
     food_nutrient_amount: List[float]
-    food_calories: float
-    food_weight_g_ml: float
 
 class BrandBase(BaseModel): 
     brand_name: str
@@ -23,6 +23,10 @@ class MealBase(BaseModel):
     meal_name: str
     user_id_FK2: int
     meal_items: List[str]
+    meal_items_weight_g: List[float]
+    meal_items_calories: List[float] = Field(default_factory=list)
+    meal_items_nutrients: List[List[str]] = Field(default_factory=list)
+    meal_items_nutrient_amounts: List[Dict[str, float]] = Field(default_factory=list)
     meal_calories: float = 0.0
     meal_nutrients: Dict[str, float] = Field(default_factory=dict)
     consumed_at: str
@@ -42,14 +46,71 @@ def search_food(food_name: str, db: db_dependency):
 
 
 @router.post("/add_food")
-# def food_nutrient_association(db: db_dependency, food: FoodBase):
-#     db_food = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{food.food_name}%")).first()
+def meal_calories_nutrient_calculator(meal: MealBase, db: db_dependency):
+    total_calories = 0.0
+    total_nutrients: Dict[str, float] = {}
+    meal_items_calories = []
+    meal_items_nutrients = []
+    meal_items_nutrient_amounts = []
 
-#     if db_food is not None:
-#         for item in food.food_nutrient_type:
-            # db_nutrient = db.query(models.Nutrient).filter(models.Nutrient.nutrient_name.ilike(f"%{item}%")).first()
-            # if db_nutrient:
-            #     db_food.food_nutrient_rl.append(db_nutrient)
+    calories_by_nutrient = {
+        "carboidrato": 4.0,
+        "carboidratos": 4.0,
+        "carbohydrate": 4.0,
+        "carbohydrates": 4.0,
+        "proteina": 4.0,
+        "proteinas": 4.0,
+        "protein": 4.0,
+        "proteins": 4.0,
+        "gordura": 9.0,
+        "gorduras": 9.0,
+        "lipidio": 9.0,
+        "lipidios": 9.0,
+        "fat": 9.0,
+        "fats": 9.0,
+    }
+
+    if len(meal.meal_items) != len(meal.meal_items_weight_g):
+        raise HTTPException(
+            status_code=400,
+            detail="meal_items e meal_items_weight_g devem ter o mesmo tamanho"
+        )
+
+    for item, item_weight_g in zip(meal.meal_items, meal.meal_items_weight_g):
+        db_food = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{item}%")).first()
+        if db_food:
+            nutrient_types = db_food.food_nutrient_type or []
+            nutrient_amounts = db_food.food_nutrient_amount or []
+            item_nutrients = []
+            item_nutrient_amounts: Dict[str, float] = {}
+            item_calories = 0.0
+            weight_ratio = item_weight_g / 100
+
+            for nutrient_type, nutrient_amount in zip(nutrient_types, nutrient_amounts):
+                consumed_amount = (nutrient_amount or 0.0) * weight_ratio
+                item_nutrients.append(nutrient_type)
+                item_nutrient_amounts[nutrient_type] = consumed_amount
+                total_nutrients[nutrient_type] = total_nutrients.get(nutrient_type, 0.0) + consumed_amount
+
+                nutrient_key = normalize("NFKD", nutrient_type.strip().lower()).encode("ascii", "ignore").decode("ascii")
+                item_calories += consumed_amount * calories_by_nutrient.get(nutrient_key, 0.0)
+
+            meal_items_calories.append(item_calories)
+            meal_items_nutrients.append(item_nutrients)
+            meal_items_nutrient_amounts.append(item_nutrient_amounts)
+            total_calories += item_calories
+        else:
+            meal_items_calories.append(0.0)
+            meal_items_nutrients.append([])
+            meal_items_nutrient_amounts.append({})
+
+    meal.meal_calories = total_calories
+    meal.meal_nutrients = total_nutrients
+    meal.meal_items_calories = meal_items_calories
+    meal.meal_items_nutrients = meal_items_nutrients
+    meal.meal_items_nutrient_amounts = meal_items_nutrient_amounts
+
+    return add_meal(meal, db)
 
 
 def add_food(food: FoodBase, db: db_dependency):
@@ -59,8 +120,6 @@ def add_food(food: FoodBase, db: db_dependency):
         brand_id_FK = food.brand_id_FK,
         food_nutrient_type = food.food_nutrient_type,
         food_nutrient_amount = food.food_nutrient_amount,
-        food_calories = food.food_calories,
-        food_weight_g_ml = food.food_weight_g_ml
     )
 
     db_food_create = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{food.food_name}%")).first()
@@ -109,34 +168,85 @@ def add_brand(brand: BrandBase, db: db_dependency):
 def meal_calories_nutrient_calculator(meal: MealBase, db: db_dependency):
     total_calories = 0.0
     total_nutrients: Dict[str, float] = {}
+    meal_items_calories = []
+    meal_items_nutrients = []
+    meal_items_nutrient_amounts = []
 
-    for item in meal.meal_items:
+    calories_by_nutrient = {
+        "carboidrato": 4.0,
+        "carboidratos": 4.0,
+        "carbohydrate": 4.0,
+        "carbohydrates": 4.0,
+        "proteina": 4.0,
+        "proteinas": 4.0,
+        "protein": 4.0,
+        "proteins": 4.0,
+        "gordura": 9.0,
+        "gorduras": 9.0,
+        "lipidio": 9.0,
+        "lipidios": 9.0,
+        "fat": 9.0,
+        "fats": 9.0,
+    }
+
+    if len(meal.meal_items) != len(meal.meal_items_weight_g):
+        raise HTTPException(
+            status_code=400,
+            detail="meal_items e meal_items_weight_g devem ter o mesmo tamanho"
+        )
+
+    for item, item_weight_g in zip(meal.meal_items, meal.meal_items_weight_g):
         db_food = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{item}%")).first()
         if db_food:
-            total_calories += db_food.food_calories or 0.0
-
             nutrient_types = db_food.food_nutrient_type or []
             nutrient_amounts = db_food.food_nutrient_amount or []
+            item_nutrients = []
+            item_nutrient_amounts: Dict[str, float] = {}
+            item_calories = 0.0
+            weight_ratio = item_weight_g / 100
 
             for nutrient_type, nutrient_amount in zip(nutrient_types, nutrient_amounts):
-                total_nutrients[nutrient_type] = (
-                    total_nutrients.get(nutrient_type, 0.0) + (nutrient_amount or 0.0)
-                )
+                consumed_amount = (nutrient_amount or 0.0) * weight_ratio
+                item_nutrients.append(nutrient_type)
+                item_nutrient_amounts[nutrient_type] = consumed_amount
+                total_nutrients[nutrient_type] = total_nutrients.get(nutrient_type, 0.0) + consumed_amount
+
+                nutrient_key = normalize("NFKD", nutrient_type.strip().lower()).encode("ascii", "ignore").decode("ascii")
+                item_calories += consumed_amount * calories_by_nutrient.get(nutrient_key, 0.0)
+
+            meal_items_calories.append(item_calories)
+            meal_items_nutrients.append(item_nutrients)
+            meal_items_nutrient_amounts.append(item_nutrient_amounts)
+            total_calories += item_calories
+        else:
+            meal_items_calories.append(0.0)
+            meal_items_nutrients.append([])
+            meal_items_nutrient_amounts.append({})
 
     meal.meal_calories = total_calories
     meal.meal_nutrients = total_nutrients
+    meal.meal_items_calories = meal_items_calories
+    meal.meal_items_nutrients = meal_items_nutrients
+    meal.meal_items_nutrient_amounts = meal_items_nutrient_amounts
 
     return add_meal(meal, db)
 
 
 def add_meal(meal: MealBase, db: db_dependency, ):
+    consumed_at = datetime.strptime(meal.consumed_at, "%d/%m/%Y").date()
+
     db_meal = models.Meal(
         meal_name = meal.meal_name,
         user_id_FK2 = meal.user_id_FK2,
         meal_items = meal.meal_items,
+        meal_items_calories = meal.meal_items_calories,
+        meal_items_nutrients = meal.meal_items_nutrients,
         meal_calories = meal.meal_calories,
         meal_nutrients = meal.meal_nutrients,
-        consumed_at = meal.consumed_at
+        meal_items_nutrient_amounts = meal.meal_items_nutrient_amounts,
+        meal_items_weight_g = meal.meal_items_weight_g,
+        weight_g = sum(meal.meal_items_weight_g),
+        consumed_at = consumed_at
     )
 
     db.add(db_meal)

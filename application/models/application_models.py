@@ -61,7 +61,7 @@ class User(Base):
     user_height_m = Column(Float, index=True)
     user_sex = Column(Boolean, index=True)
     user_created_at = Column(DateTime, index=True)
-    nutricionist_id_FK = Column(Integer, index=True)
+    nutricionist_id_FK = Column(Integer, ForeignKey("Nutricionista.nutricionist_id"), index=True, nullable=True)
 
     #Relationships
     user_allergen_rl = relationship("Allergen", secondary=user_allergen_association, back_populates="allergen_user_rl")
@@ -74,6 +74,10 @@ class Meal(Base):
     meal_id = Column(Integer, primary_key=True, index=True)
     meal_name = Column(String, index=True)
     meal_items = Column(JSON)
+    meal_items_calories = Column(JSON)
+    meal_items_nutrients = Column(JSON)
+    meal_items_nutrient_amounts = Column(JSON)
+    meal_items_weight_g = Column(JSON)   
     meal_calories = Column(Float, index=True)
     meal_nutrients = Column(JSON)
     weight_g = Column(Float, index=True)   
@@ -91,11 +95,9 @@ class Food(Base):
     food_id = Column(Integer, primary_key=True, index=True)
     food_name = Column(String, index=True)
     category_name = Column(String, index=True)
-    food_calories = Column(Float, index=True)
-    food_weight_g_ml = Column(Float, index=True)
     food_nutrient_type = Column(JSON)
     food_nutrient_amount = Column(JSON)
-    brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"), index=True)
+    brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"), index=True, nullable=True)
 
     #Relationships
     food_meal_rl = relationship("Meal", secondary=meal_food_association, back_populates="meal_food_rl")
@@ -121,5 +123,5 @@ class Nutrient(Base):
     nutrient_name = Column(String, index=True)
     nutrient_unit = Column(String, index=True)
 
-    #Realtionships
+    #Relationships
     nutrient_food_rl = relationship("Food", secondary=food_nutrient_association, back_populates="food_nutrient_rl")
