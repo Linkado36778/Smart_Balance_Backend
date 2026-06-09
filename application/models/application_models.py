@@ -81,7 +81,7 @@ class Meal(Base):
     meal_calories = Column(Float, index=True)
     meal_nutrients = Column(JSON)
     weight_g = Column(Float, index=True)   
-    consumed_at = Column(Date, index=True)
+    consumed_at_datetime = Column(DateTime, index=True)
     user_id_FK2 = Column(Integer, ForeignKey("Usuario.user_id"), index=True)
 
     #Relationships

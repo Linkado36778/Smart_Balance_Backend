@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from ..models import application_models as models
 from typing import Annotated, Dict, List, Optional
 from shared.database import engine, get_db
@@ -24,12 +24,24 @@ class MealBase(BaseModel):
     user_id_FK2: int
     meal_items: List[str]
     meal_items_weight_g: List[float]
+    consumed_at: str
+    consumed_at_datetime: datetime = Field(default_factory=datetime.now)
     meal_items_calories: List[float] = Field(default_factory=list)
     meal_items_nutrients: List[List[str]] = Field(default_factory=list)
     meal_items_nutrient_amounts: List[Dict[str, float]] = Field(default_factory=list)
     meal_calories: float = 0.0
     meal_nutrients: Dict[str, float] = Field(default_factory=dict)
-    consumed_at: str
+
+    @field_validator("consumed_at_datetime")
+    def parse_consumed_at_datetime(cls, value):
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.strptime(value, "%d/%m/%Y %H:%M:%S")
+            except ValueError:
+                return datetime.fromisoformat(value)
+        return value
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -173,6 +185,7 @@ def add_meal(meal: MealBase, db: db_dependency, ):
         user_id_FK2 = meal.user_id_FK2,
         meal_items = meal.meal_items,
         consumed_at = consumed_at,
+        consumed_at_datetime = meal.consumed_at_datetime,
         meal_items_calories = meal.meal_items_calories,
         meal_items_nutrients = meal.meal_items_nutrients,
         meal_calories = meal.meal_calories,
