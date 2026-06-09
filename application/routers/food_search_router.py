@@ -35,7 +35,7 @@ models.Base.metadata.create_all(bind=engine)
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
-@router.get("/search")
+@router.get("/search_food")
 def search_food(food_name: str, db: db_dependency):
     db_food_search = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{food_name}%")).all()
 
@@ -172,7 +172,7 @@ def add_meal(meal: MealBase, db: db_dependency, ):
         meal_name = meal.meal_name,
         user_id_FK2 = meal.user_id_FK2,
         meal_items = meal.meal_items,
-        consumed_at = meal.consumed_at,
+        consumed_at = consumed_at,
         meal_items_calories = meal.meal_items_calories,
         meal_items_nutrients = meal.meal_items_nutrients,
         meal_calories = meal.meal_calories,
@@ -180,6 +180,7 @@ def add_meal(meal: MealBase, db: db_dependency, ):
         meal_items_nutrient_amounts = meal.meal_items_nutrient_amounts,
         meal_items_weight_g = meal.meal_items_weight_g,
         weight_g = sum(meal.meal_items_weight_g),
+        
     )
 
     db.add(db_meal)
@@ -190,7 +191,6 @@ def add_meal(meal: MealBase, db: db_dependency, ):
 
 
 @router.get("/get_meal")
-
 def get_meal(meal_id: int, db: db_dependency):
     db_meal = db.query(models.Meal).filter(models.Meal.meal_id == meal_id).first()
 
