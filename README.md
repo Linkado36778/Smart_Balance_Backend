@@ -5,6 +5,7 @@ Backend of the Smart Balance developed as a Capstone project for university, UNI
 
 - Git
 - Python 3.14+
+- Python3-venv (Linux/Mac)
 - PostgreSQL
 
 ## Quick Start
