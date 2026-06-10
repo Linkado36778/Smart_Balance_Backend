@@ -58,7 +58,12 @@ initialize_database()
 
 DbDependency = Annotated[Session, Depends(get_db)]
 
-@router.post("/create_User")
+@router.post(
+    "/create_User",
+    responses={
+        200: {"model": UserBase, "description": "User created successfully"},
+    }
+)
 def create_user(user: UserBase, db: DbDependency):
     """Create a new user in the database."""
     db_user = models.User(
