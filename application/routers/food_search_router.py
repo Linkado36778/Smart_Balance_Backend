@@ -1,13 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from ..models import application_models as models
-from typing import Annotated, Dict, List, Optional, Union
+from typing import Annotated, Any, Dict, List, Optional, Union
 from shared.database import get_db, initialize_database
 from sqlalchemy.orm import Session
 from datetime import datetime
 from unicodedata import normalize
 
-router = APIRouter(prefix="/", tags=["food_search"])
+router = APIRouter(tags=["food_search"])
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -16,8 +16,8 @@ class FoodBase(BaseModel):
     food_name: str
     category_id_FK: Optional[int] = None
     brand_id_FK: Optional[int] = None
-    food_nutrient_type: List[Union[int, str]]
-    food_nutrient_amount: List[float]
+    food_nutrient_type: List[Union[int, str]] = Field(default_factory=list)
+    food_nutrient_amount: List[float] = Field(default_factory=list)
 
 
 class BrandBase(BaseModel):
@@ -66,10 +66,60 @@ def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]
     )
 
 
+def parse_nutrient_amount(value: Any, nutrient: models.Nutrient) -> float:
+    if value is None:
+        return 0.0
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, str):
+        try:
+            return float(value.replace(",", "."))
+        except ValueError:
+            return 0.0
+
+    if isinstance(value, dict):
+        possible_keys = (
+            str(nutrient.nutrient_id),
+            nutrient.nutrient_name,
+            normalize_text(nutrient.nutrient_name),
+            "amount",
+            "value",
+        )
+        for key in possible_keys:
+            if key in value:
+                return parse_nutrient_amount(value[key], nutrient)
+        return 0.0
+
+    if isinstance(value, list):
+        if len(value) == 1:
+            return parse_nutrient_amount(value[0], nutrient)
+        return 0.0
+
+    return 0.0
+
+
+def get_food_nutrients(db: Session, food_id: int):
+    food_nutrient = models.food_nutrient_association
+    return (
+        db.query(
+            models.Nutrient,
+            food_nutrient.c.food_nutrient_amount,
+        )
+        .join(
+            food_nutrient,
+            models.Nutrient.nutrient_id == food_nutrient.c.nutrient_id_FK,
+        )
+        .filter(food_nutrient.c.food_id_FK1 == food_id)
+        .all()
+    )
+
+
 # ── Foods ─────────────────────────────────────────────────────────────────────
 
 @router.get("/foods")
-def get_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: db_dependency = None):
+def list_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: db_dependency = None):
     """Lista todos os alimentos. Filtra por nome (parcial) ou por food_id."""
     query = db.query(models.Food)
 
@@ -86,16 +136,15 @@ def get_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: db_
 
 
 @router.post("/foods")
-def add_food(food: FoodBase, db: db_dependency):
+def create_food(food: FoodBase, db: db_dependency):
     """Cadastra um novo alimento com seus nutrientes."""
     if len(food.food_nutrient_type) != len(food.food_nutrient_amount):
         raise HTTPException(
             status_code=400,
             detail="food_nutrient_type e food_nutrient_amount devem ter o mesmo tamanho",
-        )
+    )
 
     nutrients = []
-    nutrient_ids = []
     for nutrient_identifier in food.food_nutrient_type:
         nutrient = get_nutrient_by_identifier(db, nutrient_identifier)
         if not nutrient:
@@ -104,7 +153,6 @@ def add_food(food: FoodBase, db: db_dependency):
                 detail=f"Nutriente '{nutrient_identifier}' nao encontrado",
             )
         nutrients.append(nutrient)
-        nutrient_ids.append(nutrient.nutrient_id)
 
     existing = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{food.food_name}%")).first()
     if existing is not None:
@@ -114,12 +162,22 @@ def add_food(food: FoodBase, db: db_dependency):
         food_name=food.food_name,
         category_id_FK=food.category_id_FK,
         brand_id_FK=food.brand_id_FK,
-        food_nutrient_type=nutrient_ids,
-        food_nutrient_amount=food.food_nutrient_amount,
     )
-    db_food.food_nutrient_rl = nutrients
 
     db.add(db_food)
+    db.flush()
+
+    food_nutrient = models.food_nutrient_association
+    for nutrient, nutrient_amount in zip(nutrients, food.food_nutrient_amount):
+        db.execute(
+            food_nutrient.insert().values(
+                nutrient_id_FK=nutrient.nutrient_id,
+                food_id_FK1=db_food.food_id,
+                food_nutrient_type=nutrient.nutrient_id,
+                food_nutrient_amount=nutrient_amount,
+            )
+        )
+
     db.commit()
     db.refresh(db_food)
     return db_food
@@ -128,7 +186,7 @@ def add_food(food: FoodBase, db: db_dependency):
 # ── Brands ────────────────────────────────────────────────────────────────────
 
 @router.get("/brands")
-def get_brands(brand_name: str, db: db_dependency):
+def search_brands(brand_name: str, db: db_dependency):
     """Busca marcas pelo nome (parcial)."""
     brands = db.query(models.Brand).filter(models.Brand.brand_name.ilike(f"%{brand_name}%")).all()
     if not brands:
@@ -137,7 +195,7 @@ def get_brands(brand_name: str, db: db_dependency):
 
 
 @router.post("/brands")
-def add_brand(brand: BrandBase, db: db_dependency):
+def create_brand(brand: BrandBase, db: db_dependency):
     """Cadastra uma nova marca."""
     existing = db.query(models.Brand).filter(models.Brand.brand_name.ilike(f"%{brand.brand_name}%")).first()
     if existing is not None:
@@ -153,7 +211,7 @@ def add_brand(brand: BrandBase, db: db_dependency):
 # ── Categories ────────────────────────────────────────────────────────────────
 
 @router.get("/categories")
-def get_categories(db: db_dependency):
+def list_categories(db: db_dependency):
     """Lista todas as categorias de alimentos."""
     return db.query(models.Category).order_by(models.Category.category_id).all()
 
@@ -161,7 +219,7 @@ def get_categories(db: db_dependency):
 # ── Nutrients ─────────────────────────────────────────────────────────────────
 
 @router.get("/nutrients")
-def get_nutrients(db: db_dependency):
+def list_nutrients(db: db_dependency):
     """Lista todos os nutrientes disponíveis."""
     return db.query(models.Nutrient).order_by(models.Nutrient.nutrient_id).all()
 
@@ -169,7 +227,7 @@ def get_nutrients(db: db_dependency):
 # ── Meals ─────────────────────────────────────────────────────────────────────
 
 @router.get("/meals")
-def get_meal(user_id_FK2: int, db: db_dependency):
+def list_user_meals(user_id_FK2: int, db: db_dependency):
     """Busca uma refeição pelo ID do usuário."""
     db_meal = db.query(models.Meal).filter(models.Meal.user_id_FK2 == user_id_FK2).all()
     if not db_meal:
@@ -178,7 +236,7 @@ def get_meal(user_id_FK2: int, db: db_dependency):
 
 
 @router.post("/meals")
-def add_meal(meal: MealBase, db: db_dependency):
+def create_meal(meal: MealBase, db: db_dependency):
     """Calcula calorias/nutrientes e cadastra uma refeição."""
     if len(meal.meal_items) != len(meal.meal_items_weight_g):
         raise HTTPException(
@@ -195,19 +253,15 @@ def add_meal(meal: MealBase, db: db_dependency):
     for item, item_weight_g in zip(meal.meal_items, meal.meal_items_weight_g):
         db_food = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{item}%")).first()
         if db_food:
-            nutrient_ids = db_food.food_nutrient_type or []
-            nutrient_amounts = db_food.food_nutrient_amount or []
             item_nutrients = []
             item_nutrient_amounts: Dict[str, float] = {}
             item_calories = 0.0
             weight_ratio = item_weight_g / 100
 
-            for nutrient_id, nutrient_amount in zip(nutrient_ids, nutrient_amounts):
-                nutrient = get_nutrient_by_identifier(db, nutrient_id)
-                if not nutrient:
-                    continue
+            for nutrient, nutrient_amount in get_food_nutrients(db, db_food.food_id):
                 nutrient_name = nutrient.nutrient_name
-                consumed_amount = (nutrient_amount or 0.0) * weight_ratio
+                amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
+                consumed_amount = amount_per_100g * weight_ratio
                 item_nutrients.append(nutrient_name)
                 item_nutrient_amounts[nutrient_name] = consumed_amount
                 total_nutrients[nutrient_name] = total_nutrients.get(nutrient_name, 0.0) + consumed_amount
