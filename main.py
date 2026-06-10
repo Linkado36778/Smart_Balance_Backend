@@ -53,3 +53,26 @@ def read_root():
         "message": "API running",
         "routes": ["/users/create_User", "/users/get_User/{user_id}"]
     }
+
+
+# Exemplo de como usar o query parameters
+
+# from fastapi import Depends
+# from typing import Annotated
+# from pydantic import BaseModel, Field
+
+# class FilterParams(BaseModel):
+#     limit: int = Field(100, gt=0, le=100)
+#     offset: int = Field(0, ge=0)
+#     order_by: str = "id"
+
+# @app.get("/v1/items/")
+# async def get_all_items(params: Annotated[FilterParams, Depends()]):
+#     """Retrieve items using query parameters described by FilterParams.
+
+#     Using Depends() here lets FastAPI populate the Pydantic model from query
+#     parameters. `params` is a FilterParams instance, so access attributes
+#     directly or call `model_dump()` to return a dict.
+#     """
+#     # return a dict of the parsed parameters
+#     return params.offset

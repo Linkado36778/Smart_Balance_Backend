@@ -9,12 +9,11 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from unicodedata import normalize
 
-router = APIRouter(tags=["food_search"])
-
+router = APIRouter(tags=["food search"])
 
 # region Schemas
 
-class FoodBase(BaseModel):
+class PostCreateFoodBodyRequest(BaseModel):
     """Base model for food creation."""
     food_name: str
     category_id_FK: Optional[int] = None
@@ -23,24 +22,20 @@ class FoodBase(BaseModel):
     food_nutrient_amount: List[float] = Field(default_factory=list)
 
 
-class BrandBase(BaseModel):
+class PostCreateBrandBodyRequest(BaseModel):
     """Base model for brand creation."""
     brand_name: str
 
 
-class MealBase(BaseModel):
+class PostCreateMealBodyRequest(BaseModel):
     """Base model for meal creation."""
-    meal_name: str
-    user_id_FK2: int
-    meal_items: List[str]
-    meal_items_weight_g: List[float]
+    name: str
+    user_id: int
     consumed_at_date: str
     consumed_at_time: str = Field(default_factory=lambda: datetime.now().strftime("%H:%M"))
-    meal_items_calories: List[float] = Field(default_factory=list)
-    meal_items_nutrients: List[List[str]] = Field(default_factory=list)
-    meal_items_nutrient_amounts: List[Dict[str, float]] = Field(default_factory=list)
-    meal_calories: float = 0.0
-    meal_nutrients: Dict[str, float] = Field(default_factory=dict)
+    calories: float = 0.0
+    weight_g: float = 0.0
+    list_foods_ids: List[int] = Field(default_factory=list)
 
 # region Setup
 
@@ -58,10 +53,10 @@ def normalize_text(value: str) -> str:
 def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]):
     """Fetch a nutrient by its ID or name. If a string is provided, it will be normalized for comparison."""
     if isinstance(nutrient_identifier, int):
-        return db.query(models.Nutrient).filter(models.Nutrient.nutrient_id == nutrient_identifier).first()
+        return db.query(models.Nutrient).filter(models.Nutrient.id == nutrient_identifier).first()
 
     if isinstance(nutrient_identifier, str) and nutrient_identifier.isdigit():
-        return db.query(models.Nutrient).filter(models.Nutrient.nutrient_id == int(nutrient_identifier)).first()
+        return db.query(models.Nutrient).filter(models.Nutrient.id == int(nutrient_identifier)).first()
 
     normalized_identifier = normalize_text(nutrient_identifier)
     nutrients = db.query(models.Nutrient).all()
@@ -106,9 +101,16 @@ def parse_nutrient_amount(value: Any, nutrient: models.Nutrient) -> float:
     return 0.0
 
 
-def get_food_nutrients(db: Session, food_id: int):
+async def get_food_nutrients (db: Session, food_id: int) -> List[tuple[models.Nutrient, Any]]:
     """Fetches the nutrients and their amounts for a given food item, handling various data formats in the association table."""
     food_nutrient = models.food_nutrient_association
+
+    result = await db.execute(
+        food_nutrient.select().where(models.Food.id == food_id)
+    )
+
+    print(result.scalars().all())
+
     return (
         db.query(
             models.Nutrient,
@@ -116,7 +118,7 @@ def get_food_nutrients(db: Session, food_id: int):
         )
         .join(
             food_nutrient,
-            models.Nutrient.nutrient_id == food_nutrient.c.nutrient_id_FK,
+            models.Nutrient.id == food_nutrient.c.nutrient_id_FK,
         )
         .filter(food_nutrient.c.food_id_FK1 == food_id)
         .all()
@@ -142,7 +144,7 @@ def list_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: Db
 
 
 @router.post("/foods")
-def create_food(food: FoodBase, db: DbDependency):
+def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
     """Cadastra um novo alimento com seus nutrientes."""
     if len(food.food_nutrient_type) != len(food.food_nutrient_amount):
         raise HTTPException(
@@ -200,7 +202,7 @@ def search_brands(brand_name: str, db: DbDependency):
 
 
 @router.post("/brands")
-def create_brand(brand: BrandBase, db: DbDependency):
+def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):
     """Cadastra uma nova marca."""
     existing = db.query(models.Brand).filter(models.Brand.brand_name.ilike(f"%{brand.brand_name}%")).first()
     if existing is not None:
@@ -240,69 +242,40 @@ def list_user_meals(user_id: int, db: DbDependency):
     return db_meal
 
 
-@router.post("/meals")
-def create_meal(meal: MealBase, db: DbDependency):
+@router.post(
+    "/meals",
+    responses={
+        200: {"model": models.Meal, "description": "Meal created successfully"},
+    }
+)
+def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
     """Calcula calorias/nutrientes e cadastra uma refeição."""
-    if len(meal.meal_items) != len(meal.meal_items_weight_g):
-        raise HTTPException(
-            status_code=400,
-            detail="meal_items e meal_items_weight_g devem ter o mesmo tamanho",
-        )
+
+    if not meal.list_foods_ids:
+        raise HTTPException(status_code=400, detail="At least one food ID must be provided")
 
     total_calories = 0.0
     total_nutrients: Dict[str, float] = {}
-    meal_items_calories = []
-    meal_items_nutrients = []
-    meal_items_nutrient_amounts = []
 
-    for item, item_weight_g in zip(meal.meal_items, meal.meal_items_weight_g):
-        db_food = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{item}%")).first()
-        if db_food:
-            item_nutrients = []
-            item_nutrient_amounts: Dict[str, float] = {}
-            item_calories = 0.0
-            weight_ratio = item_weight_g / 100
+    for food_id in meal.list_foods_ids:
+        food = db.query(models.Food).filter(models.Food.id == food_id).first()
+        for nutrient, nutrient_amount in get_food_nutrients(db, food.id):
+            amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
+            total_nutrients[nutrient.name] = total_nutrients.get(nutrient.name, 0.0) + amount_per_100g
+            item_calories += amount_per_100g * (nutrient.nutrient_calories_per_unit or 0.0)
 
-            for nutrient, nutrient_amount in get_food_nutrients(db, db_food.food_id):
-                nutrient_name = nutrient.nutrient_name
-                amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
-                consumed_amount = amount_per_100g * weight_ratio
-                item_nutrients.append(nutrient_name)
-                item_nutrient_amounts[nutrient_name] = consumed_amount
-                total_nutrients[nutrient_name] = total_nutrients.get(nutrient_name, 0.0) + consumed_amount
-                item_calories += consumed_amount * (nutrient.nutrient_calories_per_unit or 0.0)
+        total_calories += item_calories
 
-            meal_items_calories.append(item_calories)
-            meal_items_nutrients.append(item_nutrients)
-            meal_items_nutrient_amounts.append(item_nutrient_amounts)
-            total_calories += item_calories
-        else:
-            meal_items_calories.append(0.0)
-            meal_items_nutrients.append([])
-            meal_items_nutrient_amounts.append({})
+    new_meal = models.Meal()
+    new_meal.name = meal.name
+    new_meal.user_id = meal.user_id
+    new_meal.consumed_at_date = datetime.strptime(meal.consumed_at_date, "%d/%m/%Y").date()
+    new_meal.consumed_at_time = meal.consumed_at_time
+    new_meal.calories = total_calories
+    new_meal.nutrients = total_nutrients
+    new_meal.weight_g = meal.weight_g
 
-    meal.meal_calories = total_calories
-    meal.meal_nutrients = total_nutrients
-    meal.meal_items_calories = meal_items_calories
-    meal.meal_items_nutrients = meal_items_nutrients
-    meal.meal_items_nutrient_amounts = meal_items_nutrient_amounts
-
-    db_meal = models.Meal(
-        meal_name=meal.meal_name,
-        user_id_FK2=meal.user_id_FK2,
-        meal_items=meal.meal_items,
-        consumed_at_date=datetime.strptime(meal.consumed_at_date, "%d/%m/%Y").date(),
-        consumed_at_time=meal.consumed_at_time,
-        meal_items_calories=meal.meal_items_calories,
-        meal_items_nutrients=meal.meal_items_nutrients,
-        meal_calories=meal.meal_calories,
-        meal_nutrients=meal.meal_nutrients,
-        meal_items_nutrient_amounts=meal.meal_items_nutrient_amounts,
-        meal_items_weight_g=meal.meal_items_weight_g,
-        weight_g=sum(meal.meal_items_weight_g),
-    )
-
-    db.add(db_meal)
+    db.add(new_meal)
     db.commit()
-    db.refresh(db_meal)
-    return db_meal
+    db.refresh(new_meal)
+    return new_meal
