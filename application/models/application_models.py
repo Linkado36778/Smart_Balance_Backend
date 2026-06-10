@@ -4,35 +4,35 @@ from sqlalchemy.orm import relationship
 
 # Association tables for many-to-many relationships
 user_allergen_association = Table(
-    'Usuario_Alergeno',
+    'User_Allergen',
     Base.metadata,
     Column('allergen_id_FK1', Integer, ForeignKey('Alergeno.allergen_id'), primary_key=True),
     Column('user_id_FK1', Integer, ForeignKey('Usuario.user_id'), primary_key=True)
 )
 
 meal_food_association = Table(
-    'Refeicao_Alimento',
+    'Meal_Food',
     Base.metadata,
     Column('food_id_FK', Integer, ForeignKey('Alimento.food_id'), primary_key=True),
     Column('meal_id_FK', Integer, ForeignKey('Refeicao.meal_id'))
 )
 
 food_nutrient_association = Table(
-    'Alimento_Nutriente',
+    'Food_Nutrient',
     Base.metadata,
     Column('nutrient_id_FK', Integer, ForeignKey('Nutriente.nutrient_id'), primary_key=True),
     Column('food_id_FK1', Integer, ForeignKey('Alimento.food_id'), primary_key=True)
 )
 
 allergen_food_association = Table(
-    'Alergeno_Alimento',
+    'Allergen_Food',
     Base.metadata,
     Column('food_id_FK2', Integer, ForeignKey('Alimento.food_id'), primary_key=True),
     Column('allergen_id_FK2', Integer, ForeignKey('Alergeno.allergen_id'), primary_key=True)
 )
 
 class Nutricionist(Base):
-    __tablename__ = "Nutricionista"
+    __tablename__ = "Nutricionist"
 
     nutricionist_id = Column(Integer, primary_key=True, index=True)
     nutricionist_password = Column(String, index=True)
@@ -41,7 +41,7 @@ class Nutricionist(Base):
     nutricionist_email = Column(String, index=True) 
 
 class Allergen(Base):
-    __tablename__ = "Alergeno"
+    __tablename__ = "Allergen"
 
     allergen_id = Column(Integer, primary_key=True, index=True)
     allergen_name = Column(String, index=True)
@@ -52,7 +52,7 @@ class Allergen(Base):
 
 
 class User(Base):
-    __tablename__ = "Usuario"
+    __tablename__ = "User"
     user_id = Column(Integer, primary_key=True, index=True)
     user_password = Column(String, index=True)
     user_email = Column(String, index=True)
@@ -69,7 +69,7 @@ class User(Base):
 
 
 class Meal(Base):
-    __tablename__ = "Refeicao"
+    __tablename__ = "Meal"
 
     meal_id = Column(Integer, primary_key=True, index=True)
     meal_name = Column(String, index=True)
@@ -91,7 +91,7 @@ class Meal(Base):
 
 
 class Food(Base):
-    __tablename__ = "Alimento"
+    __tablename__ = "Food"
 
     food_id = Column(Integer, primary_key=True, index=True)
     food_name = Column(String, index=True)
@@ -109,7 +109,7 @@ class Food(Base):
 
 
 class Brand(Base):
-    __tablename__ = "Marca"
+    __tablename__ = "Brand"
 
     brand_id = Column(Integer, primary_key=True, index=True)
     brand_name = Column(String, index=True)
@@ -119,7 +119,7 @@ class Brand(Base):
 
 
 class Nutrient(Base):
-    __tablename__ = "Nutriente"
+    __tablename__ = "Nutrient"
 
     nutrient_id = Column(Integer, primary_key=True, index=True)
     nutrient_name = Column(String, index=True)
@@ -131,7 +131,7 @@ class Nutrient(Base):
 
 
 class Category(Base):
-    __tablename__ = "Categoria"
+    __tablename__ = "Category"
 
     category_id = Column(Integer, primary_key=True, index=True)
     category_name = Column(String, index=True)
