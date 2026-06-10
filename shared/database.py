@@ -26,9 +26,6 @@ engine = create_engine(
 SessionLocal = sessionmaker(autoflush=False, autocommit=False, bind=engine)
 Base = declarative_base()
 
-# Importa os modelos para registrar as tabelas no Base metadata
-import application.models.application_models
-
 DEFAULT_CATEGORIES = [
     "Cereais",
     "Legumes",
@@ -75,7 +72,7 @@ def seed_categories():
 
         if engine.dialect.name == "postgresql":
             db.execute(
-                text("SELECT setval(pg_get_serial_sequence('\"Categoria\"', 'category_id'), :value, true)"),
+                text("SELECT setval(pg_get_serial_sequence('\"Category\"', 'category_id'), :value, true)"),
                 {"value": len(DEFAULT_CATEGORIES)},
             )
 
@@ -106,7 +103,7 @@ def seed_nutrients():
 
         if engine.dialect.name == "postgresql":
             db.execute(
-                text("SELECT setval(pg_get_serial_sequence('\"Nutriente\"', 'nutrient_id'), :value, true)"),
+                text("SELECT setval(pg_get_serial_sequence('\"Nutrient\"', 'nutrient_id'), :value, true)"),
                 {"value": len(DEFAULT_NUTRIENTS)},
             )
 
@@ -118,7 +115,7 @@ def ensure_nutrient_schema():
     inspector = inspect(engine)
     nutrient_columns = {
         column["name"]
-        for column in inspector.get_columns("Nutriente")
+        for column in inspector.get_columns("Nutrient")
     }
 
     if "nutrient_calories_per_unit" in nutrient_columns:
@@ -127,16 +124,16 @@ def ensure_nutrient_schema():
     with engine.begin() as connection:
         if engine.dialect.name == "postgresql":
             connection.execute(
-                text('ALTER TABLE "Nutriente" ADD COLUMN IF NOT EXISTS nutrient_calories_per_unit FLOAT DEFAULT 0')
+                text('ALTER TABLE "Nutrient" ADD COLUMN IF NOT EXISTS nutrient_calories_per_unit FLOAT DEFAULT 0')
             )
         else:
             connection.execute(
-                text('ALTER TABLE "Nutriente" ADD COLUMN nutrient_calories_per_unit FLOAT DEFAULT 0')
+                text('ALTER TABLE "Nutrient" ADD COLUMN nutrient_calories_per_unit FLOAT DEFAULT 0')
             )
 
 def ensure_food_nutrient_association_schema():
     inspector = inspect(engine)
-    primary_key = inspector.get_pk_constraint("Alimento_Nutriente")
+    primary_key = inspector.get_pk_constraint("Food_Nutrient")
     primary_key_columns = set(primary_key.get("constrained_columns") or [])
 
     if primary_key_columns == {"nutrient_id_FK", "food_id_FK1"}:
@@ -146,9 +143,9 @@ def ensure_food_nutrient_association_schema():
         return
 
     with engine.begin() as connection:
-        connection.execute(text('ALTER TABLE "Alimento_Nutriente" DROP CONSTRAINT IF EXISTS "Alimento_Nutriente_pkey"'))
-        connection.execute(text('ALTER TABLE "Alimento_Nutriente" ALTER COLUMN "food_id_FK1" SET NOT NULL'))
-        connection.execute(text('ALTER TABLE "Alimento_Nutriente" ADD PRIMARY KEY ("nutrient_id_FK", "food_id_FK1")'))
+        connection.execute(text('ALTER TABLE "Food_Nutrient" DROP CONSTRAINT IF EXISTS "Food_Nutrient_pkey"'))
+        connection.execute(text('ALTER TABLE "Food_Nutrient" ALTER COLUMN "food_id_FK1" SET NOT NULL'))
+        connection.execute(text('ALTER TABLE "Food_Nutrient" ADD PRIMARY KEY ("nutrient_id_FK", "food_id_FK1")'))
 
 def initialize_database():
     Base.metadata.create_all(bind=engine)

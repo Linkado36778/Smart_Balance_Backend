@@ -6,29 +6,29 @@ from sqlalchemy.orm import relationship
 user_allergen_association = Table(
     'User_Allergen',
     Base.metadata,
-    Column('allergen_id_FK1', Integer, ForeignKey('Alergeno.allergen_id'), primary_key=True),
-    Column('user_id_FK1', Integer, ForeignKey('Usuario.user_id'), primary_key=True)
+    Column('allergen_id_FK1', Integer, ForeignKey('Allergen.allergen_id'), primary_key=True),
+    Column('user_id_FK1', Integer, ForeignKey('User.user_id'), primary_key=True)
 )
 
 meal_food_association = Table(
     'Meal_Food',
     Base.metadata,
-    Column('food_id_FK', Integer, ForeignKey('Alimento.food_id'), primary_key=True),
-    Column('meal_id_FK', Integer, ForeignKey('Refeicao.meal_id'))
+    Column('food_id_FK', Integer, ForeignKey('Food.food_id'), primary_key=True),
+    Column('meal_id_FK', Integer, ForeignKey('Meal.meal_id'))
 )
 
 food_nutrient_association = Table(
     'Food_Nutrient',
     Base.metadata,
-    Column('nutrient_id_FK', Integer, ForeignKey('Nutriente.nutrient_id'), primary_key=True),
-    Column('food_id_FK1', Integer, ForeignKey('Alimento.food_id'), primary_key=True)
+    Column('nutrient_id_FK', Integer, ForeignKey('Nutrient.nutrient_id'), primary_key=True),
+    Column('food_id_FK1', Integer, ForeignKey('Food.food_id'), primary_key=True)
 )
 
 allergen_food_association = Table(
     'Allergen_Food',
     Base.metadata,
-    Column('food_id_FK2', Integer, ForeignKey('Alimento.food_id'), primary_key=True),
-    Column('allergen_id_FK2', Integer, ForeignKey('Alergeno.allergen_id'), primary_key=True)
+    Column('food_id_FK2', Integer, ForeignKey('Food.food_id'), primary_key=True),
+    Column('allergen_id_FK2', Integer, ForeignKey('Allergen.allergen_id'), primary_key=True)
 )
 
 class Nutricionist(Base):
@@ -61,7 +61,7 @@ class User(Base):
     user_height_m = Column(Float, index=True)
     user_sex = Column(String, index=True)
     user_created_at = Column(DateTime, index=True)
-    nutricionist_id_FK = Column(Integer, ForeignKey("Nutricionista.nutricionist_id"), index=True, nullable=True)
+    nutricionist_id_FK = Column(Integer, ForeignKey("Nutricionist.nutricionist_id"), index=True, nullable=True)
 
     #Relationships
     user_allergen_rl = relationship("Allergen", secondary=user_allergen_association, back_populates="allergen_user_rl")
@@ -83,7 +83,7 @@ class Meal(Base):
     weight_g = Column(Float, index=True)   
     consumed_at_date = Column(String, index=True)
     consumed_at_time = Column(String, index=True)
-    user_id_FK2 = Column(Integer, ForeignKey("Usuario.user_id"), index=True)
+    user_id_FK2 = Column(Integer, ForeignKey("User.user_id"), index=True)
 
     #Relationships
     meal_user_rl = relationship("User", back_populates="user_meal_rl", uselist=False)
@@ -95,10 +95,10 @@ class Food(Base):
 
     food_id = Column(Integer, primary_key=True, index=True)
     food_name = Column(String, index=True)
-    category_id_FK = Column(Integer, ForeignKey("Categoria.category_id"), index=True, nullable=True)
+    category_id_FK = Column(Integer, ForeignKey("Category.category_id"), index=True, nullable=True)
     food_nutrient_type = Column(JSON)
     food_nutrient_amount = Column(JSON)
-    brand_id_FK = Column(Integer, ForeignKey("Marca.brand_id"), index=True, nullable=True)
+    brand_id_FK = Column(Integer, ForeignKey("Brand.brand_id"), index=True, nullable=True)
 
     #Relationships
     food_meal_rl = relationship("Meal", secondary=meal_food_association, back_populates="meal_food_rl")
