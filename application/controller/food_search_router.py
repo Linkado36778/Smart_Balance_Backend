@@ -1,3 +1,5 @@
+"""Food search and meal management endpoints."""
+
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from ..models import application_models as models
@@ -10,9 +12,10 @@ from unicodedata import normalize
 router = APIRouter(tags=["food_search"])
 
 
-# ── Schemas ──────────────────────────────────────────────────────────────────
+# region ── Schemas ──────────────────────────────────────────────────────────────────
 
 class FoodBase(BaseModel):
+    """Base model for food creation."""
     food_name: str
     category_id_FK: Optional[int] = None
     brand_id_FK: Optional[int] = None
@@ -21,10 +24,12 @@ class FoodBase(BaseModel):
 
 
 class BrandBase(BaseModel):
+    """Base model for brand creation."""
     brand_name: str
 
 
 class MealBase(BaseModel):
+    """Base model for meal creation."""
     meal_name: str
     user_id_FK2: int
     meal_items: List[str]
@@ -37,21 +42,21 @@ class MealBase(BaseModel):
     meal_calories: float = 0.0
     meal_nutrients: Dict[str, float] = Field(default_factory=dict)
 
-
-# ── Setup ─────────────────────────────────────────────────────────────────────
+# region ── Setup ─────────────────────────────────────────────────────────────────────
 
 initialize_database()
 
-db_dependency = Annotated[Session, Depends(get_db)]
+DbDependency = Annotated[Session, Depends(get_db)]
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# region ── Helpers ───────────────────────────────────────────────────────────────────
 
 def normalize_text(value: str) -> str:
+    """Normalize text for consistent comparisons."""
     return normalize("NFKD", value.strip().lower()).encode("ascii", "ignore").decode("ascii")
 
 
 def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]):
+    """Fetch a nutrient by its ID or name. If a string is provided, it will be normalized for comparison."""
     if isinstance(nutrient_identifier, int):
         return db.query(models.Nutrient).filter(models.Nutrient.nutrient_id == nutrient_identifier).first()
 
@@ -67,6 +72,7 @@ def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]
 
 
 def parse_nutrient_amount(value: Any, nutrient: models.Nutrient) -> float:
+    """Parse nutrient amount from various formats, ensuring it returns a float."""
     if value is None:
         return 0.0
 
@@ -101,6 +107,7 @@ def parse_nutrient_amount(value: Any, nutrient: models.Nutrient) -> float:
 
 
 def get_food_nutrients(db: Session, food_id: int):
+    """Fetches the nutrients and their amounts for a given food item, handling various data formats in the association table."""
     food_nutrient = models.food_nutrient_association
     return (
         db.query(
@@ -115,11 +122,10 @@ def get_food_nutrients(db: Session, food_id: int):
         .all()
     )
 
-
-# ── Foods ─────────────────────────────────────────────────────────────────────
+# region ── Foods ─────────────────────────────────────────────────────────────────────
 
 @router.get("/foods")
-def list_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: db_dependency = None):
+def list_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: DbDependency = None):
     """Lista todos os alimentos. Filtra por nome (parcial) ou por food_id."""
     query = db.query(models.Food)
 
@@ -136,7 +142,7 @@ def list_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: db
 
 
 @router.post("/foods")
-def create_food(food: FoodBase, db: db_dependency):
+def create_food(food: FoodBase, db: DbDependency):
     """Cadastra um novo alimento com seus nutrientes."""
     if len(food.food_nutrient_type) != len(food.food_nutrient_amount):
         raise HTTPException(
@@ -182,11 +188,10 @@ def create_food(food: FoodBase, db: db_dependency):
     db.refresh(db_food)
     return db_food
 
-
-# ── Brands ────────────────────────────────────────────────────────────────────
+# region ── Brands ────────────────────────────────────────────────────────────────────
 
 @router.get("/brands")
-def search_brands(brand_name: str, db: db_dependency):
+def search_brands(brand_name: str, db: DbDependency):
     """Busca marcas pelo nome (parcial)."""
     brands = db.query(models.Brand).filter(models.Brand.brand_name.ilike(f"%{brand_name}%")).all()
     if not brands:
@@ -195,7 +200,7 @@ def search_brands(brand_name: str, db: db_dependency):
 
 
 @router.post("/brands")
-def create_brand(brand: BrandBase, db: db_dependency):
+def create_brand(brand: BrandBase, db: DbDependency):
     """Cadastra uma nova marca."""
     existing = db.query(models.Brand).filter(models.Brand.brand_name.ilike(f"%{brand.brand_name}%")).first()
     if existing is not None:
@@ -208,35 +213,35 @@ def create_brand(brand: BrandBase, db: db_dependency):
     return db_brand
 
 
-# ── Categories ────────────────────────────────────────────────────────────────
+# region ── Categories ────────────────────────────────────────────────────────────────
 
 @router.get("/categories")
-def list_categories(db: db_dependency):
+def list_categories(db: DbDependency):
     """Lista todas as categorias de alimentos."""
     return db.query(models.Category).order_by(models.Category.category_id).all()
 
 
-# ── Nutrients ─────────────────────────────────────────────────────────────────
+# region ── Nutrients ─────────────────────────────────────────────────────────────────
 
 @router.get("/nutrients")
-def list_nutrients(db: db_dependency):
+def list_nutrients(db: DbDependency):
     """Lista todos os nutrientes disponíveis."""
     return db.query(models.Nutrient).order_by(models.Nutrient.nutrient_id).all()
 
 
-# ── Meals ─────────────────────────────────────────────────────────────────────
+# region ── Meals ─────────────────────────────────────────────────────────────────────
 
 @router.get("/meals")
-def list_user_meals(user_id_FK2: int, db: db_dependency):
+def list_user_meals(user_id: int, db: DbDependency):
     """Busca uma refeição pelo ID do usuário."""
-    db_meal = db.query(models.Meal).filter(models.Meal.user_id_FK2 == user_id_FK2).all()
+    db_meal = db.query(models.Meal).filter(models.Meal.user_id_FK2 == user_id).all()
     if not db_meal:
         raise HTTPException(status_code=404, detail="Meal not found")
     return db_meal
 
 
 @router.post("/meals")
-def create_meal(meal: MealBase, db: db_dependency):
+def create_meal(meal: MealBase, db: DbDependency):
     """Calcula calorias/nutrientes e cadastra uma refeição."""
     if len(meal.meal_items) != len(meal.meal_items_weight_g):
         raise HTTPException(
