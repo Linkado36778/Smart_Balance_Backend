@@ -1,3 +1,5 @@
+"""Database setup and initialization for the Smart Balance application."""
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
@@ -23,7 +25,7 @@ engine = create_engine(
     connect_args={"client_encoding": "utf8"},
 )
 
-SessionLocal = sessionmaker(autoflush=False, autocommit=False, bind=engine)
+SESSEON_LOCAL = sessionmaker(autoflush=False, autocommit=False, bind=engine)
 Base = declarative_base()
 
 DEFAULT_CATEGORIES = [
@@ -52,27 +54,32 @@ DEFAULT_NUTRIENTS = [
 ]
 
 def get_db():
-    db = SessionLocal()
+    """Dependency that provides a database session for each request."""
+    db = SESSEON_LOCAL()
     try:
         yield db
     finally:
         db.close()
 
 def seed_categories():
+    """Seeds the Category table with default categories if they don't already exist."""
     from application.models.application_models import Category
 
-    db = SessionLocal()
+    db = SESSEON_LOCAL()
     try:
         for category_id, category_name in enumerate(DEFAULT_CATEGORIES, start=1):
-            category = db.query(Category).filter(Category.category_id == category_id).first()
+            category = db.query(Category).filter(Category.id == category_id).first()
             if category:
-                category.category_name = category_name
+                category.name = category_name
             else:
-                db.add(Category(category_id=category_id, category_name=category_name))
+                cat = Category()
+                cat.id = category_id
+                cat.name = category_name
+                db.add(cat)
 
         if engine.dialect.name == "postgresql":
             db.execute(
-                text("SELECT setval(pg_get_serial_sequence('\"Category\"', 'category_id'), :value, true)"),
+                text("SELECT setval(pg_get_serial_sequence('\"Category\"', 'id'), :value, true)"),
                 {"value": len(DEFAULT_CATEGORIES)},
             )
 
@@ -81,29 +88,28 @@ def seed_categories():
         db.close()
 
 def seed_nutrients():
+    """Seeds the Nutrient table with default nutrients if they don't already exist."""
     from application.models.application_models import Nutrient
 
-    db = SessionLocal()
+    db = SESSEON_LOCAL()
     try:
         for nutrient_id, nutrient_data in enumerate(DEFAULT_NUTRIENTS, start=1):
-            nutrient = db.query(Nutrient).filter(Nutrient.nutrient_id == nutrient_id).first()
+            nutrient = db.query(Nutrient).filter(Nutrient.id == nutrient_id).first()
             if nutrient:
                 nutrient.nutrient_name = nutrient_data["name"]
                 nutrient.nutrient_unit = nutrient_data["unit"]
                 nutrient.nutrient_calories_per_unit = nutrient_data["calories_per_unit"]
             else:
-                db.add(
-                    Nutrient(
-                        nutrient_id=nutrient_id,
-                        nutrient_name=nutrient_data["name"],
-                        nutrient_unit=nutrient_data["unit"],
-                        nutrient_calories_per_unit=nutrient_data["calories_per_unit"],
-                    )
-                )
+                nut = Nutrient()
+                nut.id = nutrient_id
+                nut.name = nutrient_data["name"]
+                nut.unit = nutrient_data["unit"]
+                nut.calories_per_unit = nutrient_data["calories_per_unit"]
+                db.add(nut)
 
         if engine.dialect.name == "postgresql":
             db.execute(
-                text("SELECT setval(pg_get_serial_sequence('\"Nutrient\"', 'nutrient_id'), :value, true)"),
+                text("SELECT setval(pg_get_serial_sequence('\"Nutrient\"', 'id'), :value, true)"),
                 {"value": len(DEFAULT_NUTRIENTS)},
             )
 
@@ -112,6 +118,7 @@ def seed_nutrients():
         db.close()
 
 def ensure_nutrient_schema():
+    """"Ensures that the Nutrient table has the calories_per_unit column, adding it if necessary."""
     inspector = inspect(engine)
     nutrient_columns = {
         column["name"]
@@ -124,19 +131,20 @@ def ensure_nutrient_schema():
     with engine.begin() as connection:
         if engine.dialect.name == "postgresql":
             connection.execute(
-                text('ALTER TABLE "Nutrient" ADD COLUMN IF NOT EXISTS nutrient_calories_per_unit FLOAT DEFAULT 0')
+                text('ALTER TABLE "Nutrient" ADD COLUMN IF NOT EXISTS calories_per_unit FLOAT DEFAULT 0')
             )
         else:
             connection.execute(
-                text('ALTER TABLE "Nutrient" ADD COLUMN nutrient_calories_per_unit FLOAT DEFAULT 0')
+                text('ALTER TABLE "Nutrient" ADD COLUMN calories_per_unit FLOAT DEFAULT 0')
             )
 
 def ensure_food_nutrient_association_schema():
+    """"Ensures that the Food_Nutrient association table has a composite primary key on (nutrient_id, food_id), adding it if necessary."""
     inspector = inspect(engine)
     primary_key = inspector.get_pk_constraint("Food_Nutrient")
     primary_key_columns = set(primary_key.get("constrained_columns") or [])
 
-    if primary_key_columns == {"nutrient_id_FK", "food_id_FK1"}:
+    if primary_key_columns == {"nutrient_id", "food_id"}:
         return
 
     if engine.dialect.name != "postgresql":
@@ -144,10 +152,11 @@ def ensure_food_nutrient_association_schema():
 
     with engine.begin() as connection:
         connection.execute(text('ALTER TABLE "Food_Nutrient" DROP CONSTRAINT IF EXISTS "Food_Nutrient_pkey"'))
-        connection.execute(text('ALTER TABLE "Food_Nutrient" ALTER COLUMN "food_id_FK1" SET NOT NULL'))
-        connection.execute(text('ALTER TABLE "Food_Nutrient" ADD PRIMARY KEY ("nutrient_id_FK", "food_id_FK1")'))
+        connection.execute(text('ALTER TABLE "Food_Nutrient" ALTER COLUMN "food_id" SET NOT NULL'))
+        connection.execute(text('ALTER TABLE "Food_Nutrient" ADD PRIMARY KEY ("nutrient_id", "food_id")'))
 
 def initialize_database():
+    """Initializes the database by creating tables, ensuring schema consistency, and seeding default data."""
     Base.metadata.create_all(bind=engine)
     ensure_nutrient_schema()
     ensure_food_nutrient_association_schema()
@@ -155,6 +164,7 @@ def initialize_database():
     seed_nutrients()
 
 def create_table():
+    """Creates the database tables based on the defined models."""
     print(f"Modelos registrados no Base.metadata: {len(Base.metadata.tables)}")
     for table_name in Base.metadata.tables.keys():
         print(f"- {table_name}")
