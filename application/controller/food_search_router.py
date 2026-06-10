@@ -12,7 +12,7 @@ from unicodedata import normalize
 router = APIRouter(tags=["food_search"])
 
 
-# region ── Schemas ──────────────────────────────────────────────────────────────────
+# region Schemas
 
 class FoodBase(BaseModel):
     """Base model for food creation."""
@@ -42,13 +42,13 @@ class MealBase(BaseModel):
     meal_calories: float = 0.0
     meal_nutrients: Dict[str, float] = Field(default_factory=dict)
 
-# region ── Setup ─────────────────────────────────────────────────────────────────────
+# region Setup
 
 initialize_database()
 
 DbDependency = Annotated[Session, Depends(get_db)]
 
-# region ── Helpers ───────────────────────────────────────────────────────────────────
+# region Helpers
 
 def normalize_text(value: str) -> str:
     """Normalize text for consistent comparisons."""
@@ -122,7 +122,7 @@ def get_food_nutrients(db: Session, food_id: int):
         .all()
     )
 
-# region ── Foods ─────────────────────────────────────────────────────────────────────
+# region Foods
 
 @router.get("/foods")
 def list_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: DbDependency = None):
@@ -188,7 +188,7 @@ def create_food(food: FoodBase, db: DbDependency):
     db.refresh(db_food)
     return db_food
 
-# region ── Brands ────────────────────────────────────────────────────────────────────
+# region Brands
 
 @router.get("/brands")
 def search_brands(brand_name: str, db: DbDependency):
@@ -213,7 +213,7 @@ def create_brand(brand: BrandBase, db: DbDependency):
     return db_brand
 
 
-# region ── Categories ────────────────────────────────────────────────────────────────
+# region Categories
 
 @router.get("/categories")
 def list_categories(db: DbDependency):
@@ -221,7 +221,7 @@ def list_categories(db: DbDependency):
     return db.query(models.Category).order_by(models.Category.category_id).all()
 
 
-# region ── Nutrients ─────────────────────────────────────────────────────────────────
+# region Nutrients
 
 @router.get("/nutrients")
 def list_nutrients(db: DbDependency):
@@ -229,7 +229,7 @@ def list_nutrients(db: DbDependency):
     return db.query(models.Nutrient).order_by(models.Nutrient.nutrient_id).all()
 
 
-# region ── Meals ─────────────────────────────────────────────────────────────────────
+# region Meals
 
 @router.get("/meals")
 def list_user_meals(user_id: int, db: DbDependency):
