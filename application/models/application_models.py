@@ -22,8 +22,7 @@ food_nutrient_association = Table(
     Base.metadata,
     Column('nutrient_id_FK', Integer, ForeignKey('Nutrient.nutrient_id'), primary_key=True),
     Column('food_id_FK1', Integer, ForeignKey('Food.food_id'), primary_key=True),
-    Column('food_nutrient_type', JSON),
-    Column('food_nutrient_amount', JSON)
+    Column('food_nutrient_amount', Integer)
 )
 
 allergen_food_association = Table(
