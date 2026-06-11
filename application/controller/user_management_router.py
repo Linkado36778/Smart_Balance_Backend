@@ -1,19 +1,21 @@
 """Controller for user management, including user and nutricionist creation and retrieval."""
 
+from datetime import datetime
+from typing import Annotated, Optional
+
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
-from ..models import application_models as models
-from typing import Annotated, Optional
-from shared.database import get_db, initialize_database
 from sqlalchemy.orm import Session
-from datetime import datetime
+
+from shared.database import get_db
+from application.models.application_models import User, Nutricionist
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 class UserBase(BaseModel):
     """Base model for user creation."""
     email: str
-    birthdate: str
+    birthdate: datetime
     weight_kg: float
     height_m: float
     sex: str
@@ -54,8 +56,6 @@ class NutricionistBase(BaseModel):
                 return datetime.fromisoformat(value)
         return value
 
-initialize_database()
-
 DbDependency = Annotated[Session, Depends(get_db)]
 
 @router.post(
@@ -66,33 +66,34 @@ DbDependency = Annotated[Session, Depends(get_db)]
 )
 def create_user(user: UserBase, db: DbDependency):
     """Create a new user in the database."""
-    db_user = models.User(
-        user_email=user.user_email,
-        user_birthdate=user.user_birthdate,
-        user_weight_kg=user.user_weight_kg,
-        user_height_m=user.user_height_m,
-        user_sex=user.user_sex,
-        user_password=user.user_password,
-        nutricionist_id_FK=user.nutricionist_id_FK
+
+    new_user = User(
+        email = user.email,
+        birthdate = user.birthdate,
+        weight_kg = user.weight_kg,
+        height_m = user.height_m,
+        sex = user.sex,
+        password = user.password,
+        nutricionist_id = user.nutricionist_id,
+        is_active = True,
+        created_at = user.created_at
     )
 
-    db_user.user_birthdate = datetime.strptime(user.user_birthdate, "%d/%m/%Y").date()
-
-    if db_user is None:
+    if new_user is None:
         raise HTTPException(status_code=400, detail="User creation failed")
 
-    if db.query(models.User).filter(models.User.user_email == user.user_email).first():
+    if db.query(User).filter(User.email == user.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    db.add(db_user)
+    db.add(new_user)
     db.commit()
-    db.refresh(db_user)
-    return db_user
+    db.refresh(new_user)
+    return new_user
 
 @router.get("/get_User/{user_id}")
 def get_user(user_id: int, db: DbDependency):
     """Retrieve a user by their ID."""
-    db_user = db.query(models.User).filter(models.User.user_id == user_id).first()
+    db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return db_user
@@ -101,20 +102,20 @@ def get_user(user_id: int, db: DbDependency):
 @router.post("/create_Nutricionist")
 def create_nutricionist(nutricionist: NutricionistBase, db: DbDependency):
     """Create a new nutricionist in the database."""
-    db_nutricionist = models.Nutricionist(
-        nutricionist_email=nutricionist.nutricionist_email,
-        nutricionist_password=nutricionist.nutricionist_password,
-        nutricionist_phone=nutricionist.nutricionist_phone,
-        nutricionist_created_at=nutricionist.nutricionist_created_at
+    new_nutricionist = Nutricionist(
+        email = nutricionist.email,
+        password = nutricionist.password,
+        phone = nutricionist.phone,
+        created_at = nutricionist.created_at
     )
 
-    if db_nutricionist is None:
+    if new_nutricionist is None:
         raise HTTPException(status_code=400, detail="Nutricionist creation failed")
 
-    if db.query(models.Nutricionist).filter(models.Nutricionist.nutricionist_email == nutricionist.nutricionist_email).first():
+    if db.query(Nutricionist).filter(Nutricionist.email == nutricionist.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    db.add(db_nutricionist)
+    db.add(new_nutricionist)
     db.commit()
-    db.refresh(db_nutricionist)
-    return db_nutricionist
+    db.refresh(new_nutricionist)
+    return new_nutricionist

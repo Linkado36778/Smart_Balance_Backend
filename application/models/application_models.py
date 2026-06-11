@@ -1,154 +1,173 @@
 """Module provides SQLAlchemy models for the application."""
 
-import dataclasses
-from shared.database import Base
-from sqlalchemy import DateTime, Boolean, Float, Date, Integer, Column, String, ForeignKey, Table
-from sqlalchemy.orm import relationship
+from typing import Optional
+from datetime import datetime
 
-# Association tables for many-to-many relationships
-user_allergen_association = Table(
-    'User_Allergen',
-    Base.metadata,
-    Column('allergen_id', Integer, ForeignKey('Allergen.id'), primary_key=True),
-    Column('user_id', Integer, ForeignKey('User.id'), primary_key=True)
-)
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import Mapped, DeclarativeBase, MappedAsDataclass, mapped_column
 
-meal_food_association = Table(
-    'Meal_Food',
-    Base.metadata,
-    Column('food_id', Integer, ForeignKey('Food.id'), primary_key=True),
-    Column('meal_id', Integer, ForeignKey('Meal.id'))
-)
+# pylint: disable=unsubscriptable-object
+# pylint: disable=too-few-public-methods
 
-food_nutrient_association = Table(
-    'Food_Nutrient',
-    Base.metadata,
-    Column('nutrient_id', Integer, ForeignKey('Nutrient.id'), primary_key=True),
-    Column('food_id', Integer, ForeignKey('Food.id'), primary_key=True),
-    Column('amount', Integer)
-)
 
-allergen_food_association = Table(
-    'Allergen_Food',
-    Base.metadata,
-    Column('food_id', Integer, ForeignKey('Food.id'), primary_key=True),
-    Column('allergen_id', Integer, ForeignKey('Allergen.id'), primary_key=True)
-)
+class Base(MappedAsDataclass, DeclarativeBase):
+    """Base class for SQLAlchemy models, combining dataclass features with declarative mapping."""
 
-@dataclasses.dataclass
+
+class UserAllergenAssociation(Base):
+    """Resolution table Many-to-Many User, Allergen."""
+
+    __tablename__ = 'User_Allergen'
+
+    allergen_id: Mapped[int] = mapped_column(
+        ForeignKey('Allergen.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey('User.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+
+
+class MealFoodAssociation(Base):
+    """Resolution table Many-to-Many Meal, Food."""
+
+    __tablename__ = 'Meal_Food'
+
+    meal_id: Mapped[int] = mapped_column(
+        ForeignKey('Meal.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    food_id: Mapped[int] = mapped_column(
+        ForeignKey('Food.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+
+
+class FoodNutrientAssociation(Base):
+    """Resolution table Many-to-Many Food, Nutrient."""
+
+    __tablename__ = 'Food_Nutrient'
+
+    food_id: Mapped[int] = mapped_column(
+        ForeignKey('Food.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    nutrient_id: Mapped[int] = mapped_column(
+        ForeignKey('Nutrient.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    amount: Mapped[float] = mapped_column()
+
+
+class AllergenFoodAssociation(Base):
+    """Resolution table Many-to-Many Allergen, Food."""
+
+    __tablename__ = 'Allergen_Food'
+
+    food_id: Mapped[int] = mapped_column(
+        ForeignKey('Food.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    allergen_id: Mapped[int] = mapped_column(
+        ForeignKey('Allergen.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+
+
 class Nutricionist(Base):
     """Model representing a nutritionist in the application."""
 
     __tablename__ = "Nutricionist"
 
-    id = Column(Integer, primary_key=True, index=True)
-    password = Column(String, index=True)
-    created_at = Column(DateTime, index=True)
-    phone = Column(String, index=True)
-    email = Column(String, index=True)
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    password: Mapped[str] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(index=True)
+    phone: Mapped[str] = mapped_column(index=True)
+    email: Mapped[str] = mapped_column(index=True)
 
-@dataclasses.dataclass
+
+class User(Base):
+    """Model representing a user in the application."""
+
+    __tablename__ = "User"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    password: Mapped[str] = mapped_column()
+    email: Mapped[str] = mapped_column(index=True)
+    birthdate: Mapped[datetime] = mapped_column()
+    weight_kg: Mapped[float] = mapped_column()
+    height_m: Mapped[float] = mapped_column()
+    sex: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column()
+    is_active: Mapped[bool] = mapped_column()
+    nutricionist_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("Nutricionist.id"), index=True, default=None
+    )
+
+
+class Meal(Base):
+    """Model representing a meal in the application."""
+
+    __tablename__ = "Meal"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column()
+    calories: Mapped[float] = mapped_column()
+    weight_g: Mapped[float] = mapped_column()
+    consumed_at_date: Mapped[datetime] = mapped_column()
+    consumed_at_time: Mapped[datetime] = mapped_column()
+    user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
+
+
+class Food(Base):
+    """Model representing a food item in the application."""
+
+    __tablename__ = "Food"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column(index=True)
+    category_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("Category.id"), index=True, default=None
+    )
+    brand_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("Brand.id"), index=True, default=None
+    )
+
+
+class Brand(Base):
+    """Model representing a food brand in the application."""
+
+    __tablename__ = "Brand"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column(index=True)
+
+
+class Nutrient(Base):
+    """Model representing a nutrient in the application."""
+
+    __tablename__ = "Nutrient"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column(index=True)
+    unit: Mapped[str] = mapped_column(index=True)
+    calories_per_unit: Mapped[Optional[float]] = mapped_column(index=True, default=0.0)
+
+
+class Category(Base):
+    """Model representing a food category in the application."""
+
+    __tablename__ = "Category"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column(index=True)
+
+
 class Allergen(Base):
     """Model representing an allergen in the application."""
 
     __tablename__ = "Allergen"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-
-    #Relationships
-    user_rl = relationship("User", secondary=user_allergen_association, back_populates="allergen_rl")
-    food_rl = relationship("Food", secondary=allergen_food_association, back_populates="allergen_rl")
-
-
-@dataclasses.dataclass
-class User(Base):
-    """Model representing a user in the application."""
-
-    __tablename__ = "User"
-    id = Column(Integer, primary_key=True, index=True)
-    password = Column(String, index=True)
-    email = Column(String, index=True)
-    birthdate = Column(Date, index=True)
-    weight_kg = Column(Float, index=True)
-    height_m = Column(Float, index=True)
-    sex = Column(String, index=True)
-    created_at = Column(DateTime, index=True)
-    is_active = Column(Boolean, index=True)
-    nutricionist_id = Column(Integer, ForeignKey("Nutricionist.id"), index=True, nullable=True)
-
-    #Relationships
-    allergen_rl = relationship("Allergen", secondary=user_allergen_association, back_populates="user_rl")
-    meal_rl = relationship("Meal", back_populates="user_rl")
-
-
-@dataclasses.dataclass
-class Meal(Base):
-    """Model representing a meal in the application."""
-    __tablename__ = "Meal"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    calories = Column(Float, index=True)
-    nutrients = Column(Float, index=True)
-    weight_g = Column(Float, index=True)
-    consumed_at_date = Column(String, index=True)
-    consumed_at_time = Column(String, index=True)
-    user_id = Column(Integer, ForeignKey("User.id"), index=True)
-
-    #Relationships
-    user_rl = relationship("User", back_populates="meal_rl", uselist=False)
-    food_rl = relationship("Food", secondary=meal_food_association, back_populates="meal_rl")
-
-
-@dataclasses.dataclass
-class Food(Base):
-    """Model representing a food item in the application."""
-    __tablename__ = "Food"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    category_id = Column(Integer, ForeignKey("Category.id"), index=True, nullable=True)
-    brand_id = Column(Integer, ForeignKey("Brand.id"), index=True, nullable=True)
-
-    #Relationships
-    meal_rl = relationship("Meal", secondary=meal_food_association, back_populates="food_rl")
-    brand_rl = relationship("Brand", back_populates="food_rl", uselist=False)
-    category_rl = relationship("Category", back_populates="food_rl", uselist=False)
-    nutrient_rl = relationship("Nutrient", secondary=food_nutrient_association, back_populates="food_rl")
-    allergen_rl = relationship("Allergen", secondary=allergen_food_association, back_populates="food_rl")
-
-@dataclasses.dataclass
-class Brand(Base):
-    """Model representing a food brand in the application."""
-    __tablename__ = "Brand"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-
-    #Relationships
-    food_rl = relationship("Food", back_populates="brand_rl")
-
-@dataclasses.dataclass
-class Nutrient(Base):
-    """Model representing a nutrient in the application."""
-    __tablename__ = "Nutrient"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    unit = Column(String, index=True)
-    calories_per_unit = Column(Float, index=True, default=0.0)
-
-    #Relationships
-    food_rl = relationship("Food", secondary=food_nutrient_association, back_populates="nutrient_rl")
-
-@dataclasses.dataclass
-class Category(Base):
-    """Model representing a food category in the application."""
-    __tablename__ = "Category"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-
-    #Relationships
-    food_rl = relationship("Food", back_populates="category_rl")
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column(index=True)

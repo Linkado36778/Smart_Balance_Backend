@@ -1,45 +1,55 @@
 """Food search and meal management endpoints."""
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from ..models import application_models as models
-from typing import Annotated, Any, Dict, List, Optional, Union
-from shared.database import get_db, initialize_database
-from sqlalchemy.orm import Session
 from datetime import datetime
+from typing import Annotated, Any, Dict, List, Optional, Union
 from unicodedata import normalize
+
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.orm import Session
+
+from shared.database import get_db
+from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, FoodNutrientAssociation
 
 router = APIRouter(tags=["food search"])
 
 # region Schemas
 
+class NutrientAmount(BaseModel):
+    """TypedDict for nutrient amount input, allowing flexible formats."""
+    id: int
+    amount: float
+
 class PostCreateFoodBodyRequest(BaseModel):
     """Base model for food creation."""
-    food_name: str
-    category_id_FK: Optional[int] = None
-    brand_id_FK: Optional[int] = None
-    food_nutrient_type: List[Union[int, str]] = Field(default_factory=list)
-    food_nutrient_amount: List[float] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    category_id: Optional[int] = None
+    brand_id: Optional[int] = None
+    nutrients: List[NutrientAmount] = Field(default_factory=list)
+    allergen_ids: List[int] = Field(default_factory=list)
 
 
 class PostCreateBrandBodyRequest(BaseModel):
     """Base model for brand creation."""
-    brand_name: str
+    name: str
 
 
 class PostCreateMealBodyRequest(BaseModel):
     """Base model for meal creation."""
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     user_id: int
-    consumed_at_date: str
-    consumed_at_time: str = Field(default_factory=lambda: datetime.now().strftime("%H:%M"))
+    consumed_at_date: datetime
+    consumed_at_time: datetime
     calories: float = 0.0
     weight_g: float = 0.0
     list_foods_ids: List[int] = Field(default_factory=list)
 
 # region Setup
-
-initialize_database()
 
 DbDependency = Annotated[Session, Depends(get_db)]
 
@@ -53,20 +63,20 @@ def normalize_text(value: str) -> str:
 def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]):
     """Fetch a nutrient by its ID or name. If a string is provided, it will be normalized for comparison."""
     if isinstance(nutrient_identifier, int):
-        return db.query(models.Nutrient).filter(models.Nutrient.id == nutrient_identifier).first()
+        return db.query(Nutrient).filter(Nutrient.id == nutrient_identifier).first()
 
     if isinstance(nutrient_identifier, str) and nutrient_identifier.isdigit():
-        return db.query(models.Nutrient).filter(models.Nutrient.id == int(nutrient_identifier)).first()
+        return db.query(Nutrient).filter(Nutrient.id == int(nutrient_identifier)).first()
 
     normalized_identifier = normalize_text(nutrient_identifier)
-    nutrients = db.query(models.Nutrient).all()
+    nutrients = db.query(Nutrient).all()
     return next(
-        (n for n in nutrients if normalize_text(n.nutrient_name) == normalized_identifier),
+        (n for n in nutrients if normalize_text(n.name) == normalized_identifier),
         None,
     )
 
 
-def parse_nutrient_amount(value: Any, nutrient: models.Nutrient) -> float:
+def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
     """Parse nutrient amount from various formats, ensuring it returns a float."""
     if value is None:
         return 0.0
@@ -82,9 +92,9 @@ def parse_nutrient_amount(value: Any, nutrient: models.Nutrient) -> float:
 
     if isinstance(value, dict):
         possible_keys = (
-            str(nutrient.nutrient_id),
-            nutrient.nutrient_name,
-            normalize_text(nutrient.nutrient_name),
+            str(nutrient.id),
+            nutrient.name,
+            normalize_text(nutrient.name),
             "amount",
             "value",
         )
@@ -101,101 +111,96 @@ def parse_nutrient_amount(value: Any, nutrient: models.Nutrient) -> float:
     return 0.0
 
 
-async def get_food_nutrients (db: Session, food_id: int) -> List[tuple[models.Nutrient, Any]]:
-    """Fetches the nutrients and their amounts for a given food item, handling various data formats in the association table."""
-    food_nutrient = models.food_nutrient_association
+def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
+    """Fetches the nutrients and their amounts for a given food item from the association table."""
+    food_nutrient = FoodNutrientAssociation.__table__
 
-    result = await db.execute(
-        food_nutrient.select().where(models.Food.id == food_id)
-    )
-
-    print(result.scalars().all())
-
+    # join Nutrient with the association table and return (Nutrient, amount)
     return (
         db.query(
-            models.Nutrient,
-            food_nutrient.c.food_nutrient_amount,
+            Nutrient,
+            food_nutrient.c.amount,
         )
         .join(
             food_nutrient,
-            models.Nutrient.id == food_nutrient.c.nutrient_id_FK,
+            Nutrient.id == food_nutrient.c.nutrient_id,
         )
-        .filter(food_nutrient.c.food_id_FK1 == food_id)
+        .filter(food_nutrient.c.food_id == food_id)
         .all()
     )
 
 # region Foods
 
 @router.get("/foods")
-def list_foods(name: Optional[str] = None, food_id: Optional[int] = None, db: DbDependency = None):
+def list_foods(db: DbDependency, name: Optional[str] = None, food_id: Optional[int] = None):
     """Lista todos os alimentos. Filtra por nome (parcial) ou por food_id."""
-    query = db.query(models.Food)
+    query = db.query(Food)
 
     if food_id is not None:
-        food = query.filter(models.Food.food_id == food_id).first()
+        food = query.filter(Food.id == food_id).first()
         if not food:
             raise HTTPException(status_code=404, detail="Food not found")
         return food
 
     if name:
-        query = query.filter(models.Food.food_name.ilike(f"%{name}%"))
+        query = query.filter(Food.name.ilike(f"%{name}%"))
 
-    return query.order_by(models.Food.food_id).all()
+    return query.order_by(Food.id).all()
 
 
 @router.post("/foods")
 def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
     """Cadastra um novo alimento com seus nutrientes."""
-    if len(food.food_nutrient_type) != len(food.food_nutrient_amount):
-        raise HTTPException(
-            status_code=400,
-            detail="food_nutrient_type e food_nutrient_amount devem ter o mesmo tamanho",
-    )
+    try:
 
-    nutrients = []
-    for nutrient_identifier in food.food_nutrient_type:
-        nutrient = get_nutrient_by_identifier(db, nutrient_identifier)
-        if not nutrient:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Nutriente '{nutrient_identifier}' nao encontrado",
-            )
-        nutrients.append(nutrient)
+        existing = db.query(Food).filter(Food.name.ilike(f"{food.name}")).first()
 
-    existing = db.query(models.Food).filter(models.Food.food_name.ilike(f"%{food.food_name}%")).first()
-    if existing is not None:
-        raise HTTPException(status_code=400, detail="Food already exists")
+        if existing is not None:
+            raise HTTPException(status_code=400, detail="Food already exists")
 
-    db_food = models.Food(
-        food_name=food.food_name,
-        category_id_FK=food.category_id_FK,
-        brand_id_FK=food.brand_id_FK,
-    )
-
-    db.add(db_food)
-    db.flush()
-
-    food_nutrient = models.food_nutrient_association
-    for nutrient, nutrient_amount in zip(nutrients, food.food_nutrient_amount):
-        db.execute(
-            food_nutrient.insert().values(
-                nutrient_id_FK=nutrient.nutrient_id,
-                food_id_FK1=db_food.food_id,
-                food_nutrient_type=nutrient.nutrient_id,
-                food_nutrient_amount=nutrient_amount,
-            )
+        # Create food with only column fields
+        new_food = Food(
+            name=food.name,
+            category_id=food.category_id,
+            brand_id=food.brand_id,
         )
 
-    db.commit()
-    db.refresh(db_food)
-    return db_food
+        db.add(new_food)
+        db.flush()
+
+        # create association mapped instances
+        for nutrient_item in food.nutrients:
+            nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
+
+            if nutrient is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Nutrient '{nutrient_item.id}' not found",
+                )
+
+            assoc = FoodNutrientAssociation(
+                food_id=new_food.id,
+                nutrient_id=nutrient.id,
+                amount=nutrient_item.amount,
+            )
+            db.add(assoc)
+
+        db.commit()
+        db.refresh(new_food)
+        return new_food
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 # region Brands
 
 @router.get("/brands")
 def search_brands(brand_name: str, db: DbDependency):
     """Busca marcas pelo nome (parcial)."""
-    brands = db.query(models.Brand).filter(models.Brand.brand_name.ilike(f"%{brand_name}%")).all()
+    brands = db.query(Brand).filter(Brand.name.ilike(f"%{brand_name}%")).all()
     if not brands:
         raise HTTPException(status_code=404, detail="Brand not found")
     return brands
@@ -204,15 +209,18 @@ def search_brands(brand_name: str, db: DbDependency):
 @router.post("/brands")
 def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):
     """Cadastra uma nova marca."""
-    existing = db.query(models.Brand).filter(models.Brand.brand_name.ilike(f"%{brand.brand_name}%")).first()
+    existing = db.query(Brand).filter(Brand.name.ilike(f"%{brand.name}%")).first()
     if existing is not None:
         raise HTTPException(status_code=400, detail="Brand already exists")
 
-    db_brand = models.Brand(brand_name=brand.brand_name)
-    db.add(db_brand)
+    new_brand = Brand(
+        name = brand.name
+    )
+
+    db.add(new_brand)
     db.commit()
-    db.refresh(db_brand)
-    return db_brand
+    db.refresh(new_brand)
+    return new_brand
 
 
 # region Categories
@@ -220,7 +228,7 @@ def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):
 @router.get("/categories")
 def list_categories(db: DbDependency):
     """Lista todas as categorias de alimentos."""
-    return db.query(models.Category).order_by(models.Category.category_id).all()
+    return db.query(Category).order_by(Category.id).all()
 
 
 # region Nutrients
@@ -228,7 +236,7 @@ def list_categories(db: DbDependency):
 @router.get("/nutrients")
 def list_nutrients(db: DbDependency):
     """Lista todos os nutrientes disponíveis."""
-    return db.query(models.Nutrient).order_by(models.Nutrient.nutrient_id).all()
+    return db.query(Nutrient).order_by(Nutrient.id).all()
 
 
 # region Meals
@@ -236,7 +244,7 @@ def list_nutrients(db: DbDependency):
 @router.get("/meals")
 def list_user_meals(user_id: int, db: DbDependency):
     """Busca uma refeição pelo ID do usuário."""
-    db_meal = db.query(models.Meal).filter(models.Meal.user_id_FK2 == user_id).all()
+    db_meal = db.query(Meal).filter(Meal.user_id == user_id).all()
     if not db_meal:
         raise HTTPException(status_code=404, detail="Meal not found")
     return db_meal
@@ -245,7 +253,7 @@ def list_user_meals(user_id: int, db: DbDependency):
 @router.post(
     "/meals",
     responses={
-        200: {"model": models.Meal, "description": "Meal created successfully"},
+        200: {"model": Meal, "description": "Meal created successfully"},
     }
 )
 def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
@@ -254,26 +262,39 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
     if not meal.list_foods_ids:
         raise HTTPException(status_code=400, detail="At least one food ID must be provided")
 
+    user = db.query(User).filter(User.id == meal.user_id).first()
+
+    if user is None:
+        raise HTTPException(status_code=400, detail=f"User_id: {meal.user_id} dont exist")
+
     total_calories = 0.0
     total_nutrients: Dict[str, float] = {}
+    foods = []
 
     for food_id in meal.list_foods_ids:
-        food = db.query(models.Food).filter(models.Food.id == food_id).first()
+        food = db.query(Food).filter(Food.id == food_id).first()
+
+        if food is None:
+            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
+
+        foods.append(food)
+
+        item_calories = 0.0
         for nutrient, nutrient_amount in get_food_nutrients(db, food.id):
             amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
             total_nutrients[nutrient.name] = total_nutrients.get(nutrient.name, 0.0) + amount_per_100g
-            item_calories += amount_per_100g * (nutrient.nutrient_calories_per_unit or 0.0)
+            item_calories += amount_per_100g * (nutrient.calories_per_unit or 0.0)
 
         total_calories += item_calories
 
-    new_meal = models.Meal()
-    new_meal.name = meal.name
-    new_meal.user_id = meal.user_id
-    new_meal.consumed_at_date = datetime.strptime(meal.consumed_at_date, "%d/%m/%Y").date()
-    new_meal.consumed_at_time = meal.consumed_at_time
-    new_meal.calories = total_calories
-    new_meal.nutrients = total_nutrients
-    new_meal.weight_g = meal.weight_g
+    new_meal = Meal(
+        name = meal.name,
+        user_id = meal.user_id,
+        consumed_at_date = meal.consumed_at_date,
+        consumed_at_time = meal.consumed_at_time,
+        calories = total_calories,
+        weight_g = meal.weight_g
+    )
 
     db.add(new_meal)
     db.commit()

@@ -1,11 +1,14 @@
 """Database setup and initialization for the Smart Balance application."""
 
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 import sys
-from dotenv import load_dotenv
 from pathlib import Path
+
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
+
+from application.models.application_models import Category, Nutrient, Base
 
 # Adiciona o diretório raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -26,7 +29,6 @@ engine = create_engine(
 )
 
 SESSEON_LOCAL = sessionmaker(autoflush=False, autocommit=False, bind=engine)
-Base = declarative_base()
 
 DEFAULT_CATEGORIES = [
     "Cereais",
@@ -63,7 +65,6 @@ def get_db():
 
 def seed_categories():
     """Seeds the Category table with default categories if they don't already exist."""
-    from application.models.application_models import Category
 
     db = SESSEON_LOCAL()
     try:
@@ -72,9 +73,8 @@ def seed_categories():
             if category:
                 category.name = category_name
             else:
-                cat = Category()
+                cat = Category(name=category_name)
                 cat.id = category_id
-                cat.name = category_name
                 db.add(cat)
 
         if engine.dialect.name == "postgresql":
@@ -89,23 +89,18 @@ def seed_categories():
 
 def seed_nutrients():
     """Seeds the Nutrient table with default nutrients if they don't already exist."""
-    from application.models.application_models import Nutrient
 
     db = SESSEON_LOCAL()
     try:
         for nutrient_id, nutrient_data in enumerate(DEFAULT_NUTRIENTS, start=1):
             nutrient = db.query(Nutrient).filter(Nutrient.id == nutrient_id).first()
-            if nutrient:
-                nutrient.nutrient_name = nutrient_data["name"]
-                nutrient.nutrient_unit = nutrient_data["unit"]
-                nutrient.nutrient_calories_per_unit = nutrient_data["calories_per_unit"]
-            else:
-                nut = Nutrient()
-                nut.id = nutrient_id
-                nut.name = nutrient_data["name"]
-                nut.unit = nutrient_data["unit"]
-                nut.calories_per_unit = nutrient_data["calories_per_unit"]
-                db.add(nut)
+            print(nutrient_id, nutrient_data)
+            if not nutrient:
+                db.add(Nutrient(
+                    name = nutrient_data["name"],
+                    unit = nutrient_data["unit"],
+                    calories_per_unit = nutrient_data["calories_per_unit"]
+                ))
 
         if engine.dialect.name == "postgresql":
             db.execute(
@@ -118,14 +113,14 @@ def seed_nutrients():
         db.close()
 
 def ensure_nutrient_schema():
-    """"Ensures that the Nutrient table has the calories_per_unit column, adding it if necessary."""
+    """Ensures that the Nutrient table has the calories_per_unit column, adding it if necessary."""
     inspector = inspect(engine)
     nutrient_columns = {
         column["name"]
         for column in inspector.get_columns("Nutrient")
     }
 
-    if "nutrient_calories_per_unit" in nutrient_columns:
+    if "calories_per_unit" in nutrient_columns:
         return
 
     with engine.begin() as connection:
