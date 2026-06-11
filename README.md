@@ -21,5 +21,5 @@ SQLALCHEMY_DATABASE_URL="postgresql://<your_user>:<your_password>@<host>:<port>/
 2. Create a python virtual environment: `python -m venv .venv`.
 3. Activate the virtual environment using `source .venv/bin/activate` (on Linux/Mac) or just `.venv\Scripts\activate` (on Windows).
 4. Install the dependencies running `pip install -r requirements.txt`.
-5. Run `python main.py` to create the database.
+5. Run `python script.py` to create the database.
 6. Start the application using `fastapi run main.py`.
