@@ -1,10 +1,12 @@
 """Main application entry point for the Smart Balance API."""
 
-from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 
 from application.controller import user_management_router
 from application.controller import food_search_router
+from application.models.return_model import ReturnException
 
 app = FastAPI(
     docs_url=None,  # Disable default Swagger UI
@@ -14,6 +16,19 @@ app = FastAPI(
 )
 app.include_router(user_management_router.router)
 app.include_router(food_search_router.router)
+
+@app.exception_handler(ReturnException)
+async def return_exception_handler(request: Request, exc: ReturnException):
+    """Custom exception handler for ReturnException, returning a standardized JSON response."""
+
+    # Monta o corpo da resposta com os campos da sua dataclass
+    response_body = {"success": exc.success, "message": exc.message, "data": exc.data, "status_code": exc.status_code, "url": str(request.url)}
+
+    # Inclui o campo data apenas se ele foi preenchido
+    if exc.data is not None:
+        response_body["data"] = exc.data
+
+    return JSONResponse(status_code=exc.status_code, content=response_body)
 
 @app.get("/docs", include_in_schema=False)
 async def scalar_html():

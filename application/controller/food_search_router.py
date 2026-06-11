@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from shared.database import get_db
 from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, FoodNutrientAssociation
+from application.models.return_model import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
 
@@ -187,13 +188,18 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
 
         db.commit()
         db.refresh(new_food)
-        return new_food
-    except HTTPException:
+
+        return ReturnModel(
+            message="Food created successfully",
+            data=new_food,
+            success=True
+        )
+    except Exception as err:
         db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise ReturnException(
+            message=str(err),
+            success=False,
+        ) from err
 
 # region Brands
 
