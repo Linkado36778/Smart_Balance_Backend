@@ -106,20 +106,18 @@ def get_user(route_user_id: int, db: DbDependency):
 
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-
-    ret = ReturnSuccessUserModel(
-        id = user.id,
-        email = user.email,
-        birthdate = user.birthdate,
-        weight_kg = user.weight_kg,
-        height_m = user.height_m,
-        sex = user.sex,
-        created_at = user.created_at
-    )
     
     return ReturnModel(
         message = "User getted successfully",
-        data = ret,
+        data = ReturnSuccessUserModel(
+            id = user.id,
+            email = user.email,
+            birthdate = user.birthdate,
+            weight_kg = user.weight_kg,
+            height_m = user.height_m,
+            sex = user.sex,
+            created_at = user.created_at
+        ),
         success = True
     )
 

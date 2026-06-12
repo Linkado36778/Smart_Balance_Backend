@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 
-from application.controller import user_controller, food_controller, auth_controller
+from application.controller import user_controller, food_controller, auth_controller, vision_recognition_controller
 from application.models.return_models import ReturnException
 
 app = FastAPI(
@@ -13,9 +13,16 @@ app = FastAPI(
     title="Smart Balance API",
     description="API for user management and food search functionalities in the Smart Balance application.",
 )
+
+#region Routers
+
 app.include_router(auth_controller.router)
 app.include_router(user_controller.router)
 app.include_router(food_controller.router)
+app.include_router(vision_recognition_controller.router)
+
+
+#region Exception
 
 @app.exception_handler(ReturnException)
 async def return_exception_handler(request: Request, exc: ReturnException):
@@ -29,6 +36,9 @@ async def return_exception_handler(request: Request, exc: ReturnException):
         response_body["data"] = exc.data
 
     return JSONResponse(status_code=exc.status_code, content=response_body)
+
+
+#region Docs
 
 @app.get("/docs", include_in_schema=False)
 async def scalar_html():
@@ -60,6 +70,9 @@ async def scalar_html():
         # Botões da sidebar
         hide_client_button=False,  # esconde o botão de gerar código cliente
     )
+
+
+#region Root
 
 @app.get("/")
 def read_root():

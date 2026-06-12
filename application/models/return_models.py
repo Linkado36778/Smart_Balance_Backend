@@ -13,8 +13,8 @@ T = TypeVar("T")
 class ReturnModel(Generic[T]):
     """Class to standardize the return of the API endpoints, providing a consistent structure for responses."""
 
-    success: bool
     message: str
+    success: bool = True
     data: Optional[T] = None
 
 @dataclass
@@ -25,7 +25,7 @@ class ReturnException(Exception, Generic[T]):
     """
 
     message: str
-    success: bool
+    success: bool = False
     data: Optional[T] = None
     status_code: int = 400
 
@@ -46,3 +46,12 @@ class ReturnSuccessUserModel():
     height_m: float
     sex: str
     created_at: datetime
+
+#region Recognition
+
+@dataclass
+class ReturnSuccessSaveImageModel():
+    """Class to standardize the return of visual recognition save image for dataset"""
+
+    filename: str
+    saved_path: str
