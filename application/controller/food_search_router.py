@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
-from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, FoodNutrientAssociation
+from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, FoodNutrientAssociation, AllergenFoodAssociation
 from application.models.return_model import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
@@ -168,6 +168,21 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
 
         db.add(new_food)
         db.flush()
+
+        for allergen_id in food.allergen_ids:
+            allergen = db.query(Nutrient).filter(Nutrient.id == allergen_id).first()
+
+            if allergen is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Allergen with id '{allergen_id}' not found",
+                )
+
+            assoc = AllergenFoodAssociation(
+                allergen_id=allergen.id,
+                food_id=new_food.id,
+            )
+            db.add(assoc)
 
         # create association mapped instances
         for nutrient_item in food.nutrients:
