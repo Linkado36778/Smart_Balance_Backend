@@ -99,8 +99,8 @@ class User(Base):
     weight_kg: Mapped[float] = mapped_column()
     height_m: Mapped[float] = mapped_column()
     sex: Mapped[str] = mapped_column()
-    created_at: Mapped[datetime] = mapped_column()
-    is_active: Mapped[bool] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(init=False, default=datetime.now)
+    is_active: Mapped[bool] = mapped_column(default=True)
     nutricionist_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("Nutricionist.id"), index=True, default=None
     )
@@ -115,8 +115,7 @@ class Meal(Base):
     name: Mapped[str] = mapped_column()
     calories: Mapped[float] = mapped_column()
     weight_g: Mapped[float] = mapped_column()
-    consumed_at_date: Mapped[datetime] = mapped_column()
-    consumed_at_time: Mapped[datetime] = mapped_column()
+    consumed_at: Mapped[datetime] = mapped_column()
     user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
 
 

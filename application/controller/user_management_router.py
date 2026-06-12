@@ -6,13 +6,17 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from pwdlib import PasswordHash
 
 from shared.database import get_db
 from application.models.application_models import User, Nutricionist
+from application.models.return_model import ReturnModel
+
 
 router = APIRouter(prefix="/users", tags=["users"])
+password_hash = PasswordHash.recommended()
 
-class UserBase(BaseModel):
+class PostCreateUserBodyRequest(BaseModel):
     """Base model for user creation."""
     email: str
     birthdate: datetime
@@ -20,23 +24,9 @@ class UserBase(BaseModel):
     height_m: float
     sex: str
     password: str
-    created_at: datetime = Field(default_factory=datetime.now)
     nutricionist_id: Optional[int] = None
 
-    @field_validator("created_at")
-    @classmethod
-    def parse_user_created_at(cls, value):
-        """Parse the user_created_at field to ensure it's a datetime object."""
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.strptime(value, "%d/%m/%Y %H:%M:%S")
-            except ValueError:
-                return datetime.fromisoformat(value)
-        return value
-
-class NutricionistBase(BaseModel):
+class PostCreateNutricionistBodyRequest(BaseModel):
     """Base model for nutricionist creation."""
     email: str
     password: str
@@ -61,10 +51,10 @@ DbDependency = Annotated[Session, Depends(get_db)]
 @router.post(
     "/create_User",
     responses={
-        200: {"model": UserBase, "description": "User created successfully"},
+        200: {"model": PostCreateUserBodyRequest, "description": "User created successfully"},
     }
 )
-def create_user(user: UserBase, db: DbDependency):
+def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
     """Create a new user in the database."""
 
     new_user = User(
@@ -73,10 +63,8 @@ def create_user(user: UserBase, db: DbDependency):
         weight_kg = user.weight_kg,
         height_m = user.height_m,
         sex = user.sex,
-        password = user.password,
+        password = password_hash.hash(user.password),
         nutricionist_id = user.nutricionist_id,
-        is_active = True,
-        created_at = user.created_at
     )
 
     if new_user is None:
@@ -88,7 +76,19 @@ def create_user(user: UserBase, db: DbDependency):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    return ReturnModel(
+        message = "User created successfully",
+        data = {
+            "id": new_user.id,
+            "email": new_user.email,
+            "birthdate": new_user.birthdate,
+            "weight_kg": new_user.weight_kg,
+            "height_m": new_user.height_m,
+            "sex": new_user.sex,
+            "created_at": new_user.created_at
+        },
+        success = True
+    )
 
 @router.get("/get_User/{user_id}")
 def get_user(user_id: int, db: DbDependency):
@@ -100,7 +100,7 @@ def get_user(user_id: int, db: DbDependency):
 
 
 @router.post("/create_Nutricionist")
-def create_nutricionist(nutricionist: NutricionistBase, db: DbDependency):
+def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
     """Create a new nutricionist in the database."""
     new_nutricionist = Nutricionist(
         email = nutricionist.email,

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
-from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, FoodNutrientAssociation, AllergenFoodAssociation
+from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation
 from application.models.return_model import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
@@ -44,8 +44,7 @@ class PostCreateMealBodyRequest(BaseModel):
 
     name: str
     user_id: int
-    consumed_at_date: datetime
-    consumed_at_time: datetime
+    consumed_at: datetime
     calories: float = 0.0
     weight_g: float = 0.0
     list_foods_ids: List[int] = Field(default_factory=list)
@@ -153,7 +152,6 @@ def list_foods(db: DbDependency, name: Optional[str] = None, food_id: Optional[i
 def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
     """Cadastra um novo alimento com seus nutrientes."""
     try:
-
         existing = db.query(Food).filter(Food.name.ilike(f"{food.name}")).first()
 
         if existing is not None:
@@ -170,7 +168,7 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
         db.flush()
 
         for allergen_id in food.allergen_ids:
-            allergen = db.query(Nutrient).filter(Nutrient.id == allergen_id).first()
+            allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
 
             if allergen is None:
                 raise HTTPException(
@@ -209,6 +207,7 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
             data=new_food,
             success=True
         )
+
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -290,14 +289,14 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
 
     total_calories = 0.0
     total_nutrients: Dict[str, float] = {}
-    foods = []
+    foods: List[Food] = []
 
     for food_id in meal.list_foods_ids:
         food = db.query(Food).filter(Food.id == food_id).first()
 
         if food is None:
             raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
-
+        
         foods.append(food)
 
         item_calories = 0.0
@@ -311,13 +310,20 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
     new_meal = Meal(
         name = meal.name,
         user_id = meal.user_id,
-        consumed_at_date = meal.consumed_at_date,
-        consumed_at_time = meal.consumed_at_time,
+        consumed_at = meal.consumed_at,
         calories = total_calories,
         weight_g = meal.weight_g
     )
-
     db.add(new_meal)
+    db.flush()
+
+    for food in foods:
+        assoc = MealFoodAssociation(
+            meal_id=new_meal.id,
+            food_id=food.id,
+        )
+        db.add(assoc)
+
     db.commit()
     db.refresh(new_meal)
     return new_meal
