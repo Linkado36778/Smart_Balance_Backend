@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from shared.database import get_db
 from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation
-from application.models.return_model import ReturnModel, ReturnException
+from application.models.return_models import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
 

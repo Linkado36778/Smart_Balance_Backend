@@ -10,8 +10,7 @@ from pwdlib import PasswordHash
 
 from shared.database import get_db
 from application.models.application_models import User, Nutricionist
-from application.models.return_model import ReturnModel
-
+from application.models.return_models import ReturnModel, ReturnSuccessUserModel
 
 router = APIRouter(prefix="/users", tags=["users"])
 password_hash = PasswordHash.recommended()
@@ -51,7 +50,7 @@ DbDependency = Annotated[Session, Depends(get_db)]
 @router.post(
     "/create_User",
     responses={
-        200: {"model": PostCreateUserBodyRequest, "description": "User created successfully"},
+        200: {"model": ReturnModel[ReturnSuccessUserModel], "description": "User created successfully"},
     }
 )
 def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
@@ -76,17 +75,20 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    ret = ReturnSuccessUserModel(
+        id = new_user.id,
+        email = new_user.email,
+        birthdate = new_user.birthdate,
+        weight_kg = new_user.weight_kg,
+        height_m = new_user.height_m,
+        sex = new_user.sex,
+        created_at = new_user.created_at
+    )
+
     return ReturnModel(
         message = "User created successfully",
-        data = {
-            "id": new_user.id,
-            "email": new_user.email,
-            "birthdate": new_user.birthdate,
-            "weight_kg": new_user.weight_kg,
-            "height_m": new_user.height_m,
-            "sex": new_user.sex,
-            "created_at": new_user.created_at
-        },
+        data = ret,
         success = True
     )
 

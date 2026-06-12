@@ -6,7 +6,7 @@ from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 
 from application.controller import user_management_router
 from application.controller import food_search_router
-from application.models.return_model import ReturnException
+from application.models.return_models import ReturnException
 
 app = FastAPI(
     docs_url=None,  # Disable default Swagger UI
