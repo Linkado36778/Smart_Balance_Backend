@@ -26,6 +26,8 @@ SQLALCHEMY_DATABASE_URL="postgresql://<your_user>:<your_password>@<host>:<port>/
 
 ## Database Diagram
 
+[dbdiagram.io](https://dbdiagram.io/d/TCC-69d6f447808962968450ace7)
+
 ![Database Diagram Imagem](./docs/TCC.png)
 
 <details>
