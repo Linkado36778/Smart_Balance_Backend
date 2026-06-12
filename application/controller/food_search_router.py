@@ -59,7 +59,6 @@ def normalize_text(value: str) -> str:
     """Normalize text for consistent comparisons."""
     return normalize("NFKD", value.strip().lower()).encode("ascii", "ignore").decode("ascii")
 
-
 def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]):
     """Fetch a nutrient by its ID or name. If a string is provided, it will be normalized for comparison."""
     if isinstance(nutrient_identifier, int):
@@ -74,7 +73,6 @@ def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]
         (n for n in nutrients if normalize_text(n.name) == normalized_identifier),
         None,
     )
-
 
 def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
     """Parse nutrient amount from various formats, ensuring it returns a float."""
@@ -110,7 +108,6 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
 
     return 0.0
 
-
 def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
     """Fetches the nutrients and their amounts for a given food item from the association table."""
     food_nutrient = FoodNutrientAssociation.__table__
@@ -131,7 +128,13 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
 
 # region Foods
 
-@router.get("/foods")
+
+@router.get(
+    "/foods",
+    responses={
+        200: {"model": ReturnModel[Food], "description": "Foods getted successfully"},
+    }
+)
 def list_foods(db: DbDependency, name: Optional[str] = None, food_id: Optional[int] = None):
     """Lista todos os alimentos. Filtra por nome (parcial) ou por food_id."""
     query = db.query(Food)
@@ -145,10 +148,19 @@ def list_foods(db: DbDependency, name: Optional[str] = None, food_id: Optional[i
     if name:
         query = query.filter(Food.name.ilike(f"%{name}%"))
 
-    return query.order_by(Food.id).all()
+    return ReturnModel(
+        message="Foods getted successfully",
+        data=query.order_by(Food.id).all(),
+        success=True
+    )
 
 
-@router.post("/foods")
+@router.post(
+    "/foods",
+    responses={
+        200: {"model": ReturnModel, "description": "Foods created successfully"},
+    }
+)
 def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
     """Cadastra um novo alimento com seus nutrientes."""
     try:
@@ -204,7 +216,7 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
 
         return ReturnModel(
             message="Food created successfully",
-            data=new_food,
+            data=None,
             success=True
         )
 
@@ -217,63 +229,111 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
 
 # region Brands
 
-@router.get("/brands")
+@router.get(
+    "/brands",
+    responses={
+        200: {"model": ReturnModel[Brand], "description": "Brands getted successfully"},
+    }
+)
 def search_brands(brand_name: str, db: DbDependency):
     """Busca marcas pelo nome (parcial)."""
     brands = db.query(Brand).filter(Brand.name.ilike(f"%{brand_name}%")).all()
+
     if not brands:
         raise HTTPException(status_code=404, detail="Brand not found")
-    return brands
+    
+    return ReturnModel(
+        message="Brands getted successfully",
+        data=brands,
+        success=True
+    )
 
 
-@router.post("/brands")
+@router.post(
+    "/brands",
+    responses={
+        200: {"model": ReturnModel, "description": "Brands created successfully"},
+    }
+)
 def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):
     """Cadastra uma nova marca."""
     existing = db.query(Brand).filter(Brand.name.ilike(f"%{brand.name}%")).first()
+
     if existing is not None:
         raise HTTPException(status_code=400, detail="Brand already exists")
 
     new_brand = Brand(
-        name = brand.name
+        name=brand.name
     )
 
     db.add(new_brand)
     db.commit()
     db.refresh(new_brand)
-    return new_brand
 
+    return ReturnModel(
+        message="Brands created successfully",
+        data=None,
+        success=True
+    )
 
 # region Categories
 
-@router.get("/categories")
+@router.get(
+    "/categories",
+    responses={
+        200: {"model": ReturnModel[Category], "description": "Categories getted successfully"},
+    }
+)
 def list_categories(db: DbDependency):
     """Lista todas as categorias de alimentos."""
-    return db.query(Category).order_by(Category.id).all()
-
+    return ReturnModel(
+        message="Categories getted successfully",
+        data=db.query(Category).order_by(Category.id).all(),
+        success=True
+    )
 
 # region Nutrients
 
-@router.get("/nutrients")
+@router.get(
+    "/nutrients",
+    responses={
+        200: {"model": ReturnModel[Nutrient], "description": "Nutrients getted successfully"},
+    }
+)
 def list_nutrients(db: DbDependency):
     """Lista todos os nutrientes disponíveis."""
-    return db.query(Nutrient).order_by(Nutrient.id).all()
-
+    return ReturnModel(
+        message="Nutrients getted successfully",
+        data=db.query(Nutrient).order_by(Nutrient.id).all(),
+        success=True
+    )
 
 # region Meals
 
-@router.get("/meals")
+@router.get(
+    "/meals",
+    responses={
+        200: {"model": ReturnModel[Meal], "description": "Meal getted successfully"},
+    }
+)
 def list_user_meals(user_id: int, db: DbDependency):
     """Busca uma refeição pelo ID do usuário."""
-    db_meal = db.query(Meal).filter(Meal.user_id == user_id).all()
-    if not db_meal:
+    meal = db.query(Meal).filter(Meal.user_id == user_id).all()
+
+    if not meal:
         raise HTTPException(status_code=404, detail="Meal not found")
-    return db_meal
+    
+    return ReturnModel(
+        message="Meal getted successfully",
+        data=meal,
+        success=True
+    )
 
 
 @router.post(
     "/meals",
     responses={
-        200: {"model": Meal, "description": "Meal created successfully"},
+        200: {"model": ReturnModel, "description": "Meal created successfully"},
     }
 )
 def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
@@ -326,4 +386,8 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
 
     db.commit()
     db.refresh(new_meal)
-    return new_meal
+    return ReturnModel(
+        message="Meal created successfully",
+        data=None,
+        success=True
+    )

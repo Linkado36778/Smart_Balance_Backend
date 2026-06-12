@@ -47,10 +47,11 @@ class PostCreateNutricionistBodyRequest(BaseModel):
 
 DbDependency = Annotated[Session, Depends(get_db)]
 
+
 @router.post(
     "/create_User",
-    responses={
-        200: {"model": ReturnModel[ReturnSuccessUserModel], "description": "User created successfully"},
+    responses = {
+        200: {"model": ReturnModel, "description": "User created successfully"},
     }
 )
 def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
@@ -76,37 +77,54 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
     db.commit()
     db.refresh(new_user)
 
-    ret = ReturnSuccessUserModel(
-        id = new_user.id,
-        email = new_user.email,
-        birthdate = new_user.birthdate,
-        weight_kg = new_user.weight_kg,
-        height_m = new_user.height_m,
-        sex = new_user.sex,
-        created_at = new_user.created_at
-    )
-
     return ReturnModel(
         message = "User created successfully",
+        data = None,
+        success = True
+    )
+
+
+@router.get(
+    "/get_User/{user_id}",
+    responses = {
+        200: {"model": ReturnModel[ReturnSuccessUserModel], "description": "User getted successfully"},
+    }
+)
+def get_user(user_id: int, db: DbDependency):
+    """Retrieve a user by their ID."""
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    ret = ReturnSuccessUserModel(
+        id = user.id,
+        email = user.email,
+        birthdate = user.birthdate,
+        weight_kg = user.weight_kg,
+        height_m = user.height_m,
+        sex = user.sex,
+        created_at = user.created_at
+    )
+    
+    return ReturnModel(
+        message = "User getted successfully",
         data = ret,
         success = True
     )
 
-@router.get("/get_User/{user_id}")
-def get_user(user_id: int, db: DbDependency):
-    """Retrieve a user by their ID."""
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return db_user
 
-
-@router.post("/create_Nutricionist")
+@router.post(
+    "/create_Nutricionist",
+    responses = {
+        200: {"model": ReturnModel, "description": "Nutricionist created successfully"},
+    }
+)
 def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
     """Create a new nutricionist in the database."""
     new_nutricionist = Nutricionist(
         email = nutricionist.email,
-        password = nutricionist.password,
+        password = password_hash.hash(nutricionist.password),
         phone = nutricionist.phone,
         created_at = nutricionist.created_at
     )
@@ -120,4 +138,9 @@ def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbD
     db.add(new_nutricionist)
     db.commit()
     db.refresh(new_nutricionist)
-    return new_nutricionist
+
+    return ReturnModel(
+        message = "Nutricionist created successfully",
+        data = None,
+        success = True
+    )
