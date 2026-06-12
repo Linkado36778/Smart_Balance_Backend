@@ -12,7 +12,11 @@ from shared.database import get_db
 from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation
 from application.models.return_models import ReturnModel, ReturnException
 
+
+#region Setup
+
 router = APIRouter(tags=["food search"])
+DbDependency = Annotated[Session, Depends(get_db)]
 
 #region Schemas
 
@@ -49,10 +53,6 @@ class PostCreateMealBodyRequest(BaseModel):
     weight_g: float = 0.0
     list_foods_ids: List[int] = Field(default_factory=list)
 
-#region Setup
-
-DbDependency = Annotated[Session, Depends(get_db)]
-
 #region Helpers
 
 def normalize_text(value: str) -> str:
@@ -83,10 +83,7 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
         return float(value)
 
     if isinstance(value, str):
-        try:
-            return float(value.replace(",", "."))
-        except ValueError:
-            return 0.0
+        return float(value.replace(",", "."))
 
     if isinstance(value, dict):
         possible_keys = (
@@ -99,12 +96,10 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
         for key in possible_keys:
             if key in value:
                 return parse_nutrient_amount(value[key], nutrient)
-        return 0.0
 
     if isinstance(value, list):
         if len(value) == 1:
             return parse_nutrient_amount(value[0], nutrient)
-        return 0.0
 
     return 0.0
 
