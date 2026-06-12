@@ -95,7 +95,7 @@ def seed_nutrients():
         for nutrient_id, nutrient_data in enumerate(DEFAULT_NUTRIENTS, start=1):
             nutrient = db.query(Nutrient).filter(Nutrient.id == nutrient_id).first()
             print(nutrient_id, nutrient_data)
-            if not nutrient:
+            if nutrient is None:
                 db.add(Nutrient(
                     name = nutrient_data["name"],
                     unit = nutrient_data["unit"],

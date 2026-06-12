@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 
-from application.controller import user_controller, food_controller
+from application.controller import user_controller, food_controller, auth_controller
 from application.models.return_models import ReturnException
 
 app = FastAPI(
@@ -13,6 +13,7 @@ app = FastAPI(
     title="Smart Balance API",
     description="API for user management and food search functionalities in the Smart Balance application.",
 )
+app.include_router(auth_controller.router)
 app.include_router(user_controller.router)
 app.include_router(food_controller.router)
 

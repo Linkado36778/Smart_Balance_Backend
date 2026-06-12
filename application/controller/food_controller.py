@@ -15,7 +15,7 @@ from application.models.return_models import ReturnModel, ReturnException
 
 #region Setup
 
-router = APIRouter(tags=["food search"])
+router = APIRouter(tags=["Food"])
 DbDependency = Annotated[Session, Depends(get_db)]
 
 #region Schemas
@@ -121,8 +121,8 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
         .all()
     )
 
-#region Foods
 
+#region Foods
 
 @router.get(
     "/foods",
@@ -130,18 +130,18 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
         200: {"model": ReturnModel[Food], "description": "Foods getted successfully"},
     }
 )
-def list_foods(db: DbDependency, name: Optional[str] = None, food_id: Optional[int] = None):
+def list_foods(db: DbDependency, query_name: Optional[str] = None, query_food_id: Optional[int] = None):
     """Lista todos os alimentos. Filtra por nome (parcial) ou por food_id."""
     query = db.query(Food)
 
-    if food_id is not None:
-        food = query.filter(Food.id == food_id).first()
-        if not food:
+    if query_food_id is not None:
+        food = query.filter(Food.id == query_food_id).first()
+        if food is None:
             raise HTTPException(status_code=404, detail="Food not found")
         return food
 
-    if name:
-        query = query.filter(Food.name.ilike(f"%{name}%"))
+    if query_name:
+        query = query.filter(Food.name.ilike(f"%{query_name}%"))
 
     return ReturnModel(
         message="Foods getted successfully",
@@ -156,25 +156,25 @@ def list_foods(db: DbDependency, name: Optional[str] = None, food_id: Optional[i
         200: {"model": ReturnModel, "description": "Foods created successfully"},
     }
 )
-def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
+def create_food(body: PostCreateFoodBodyRequest, db: DbDependency):
     """Cadastra um novo alimento com seus nutrientes."""
     try:
-        existing = db.query(Food).filter(Food.name.ilike(f"{food.name}")).first()
+        existing = db.query(Food).filter(Food.name.ilike(body.name)).first()
 
         if existing is not None:
             raise HTTPException(status_code=400, detail="Food already exists")
 
         # Create food with only column fields
         new_food = Food(
-            name=food.name,
-            category_id=food.category_id,
-            brand_id=food.brand_id,
+            name=body.name,
+            category_id=body.category_id,
+            brand_id=body.brand_id,
         )
 
         db.add(new_food)
         db.flush()
 
-        for allergen_id in food.allergen_ids:
+        for allergen_id in body.allergen_ids:
             allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
 
             if allergen is None:
@@ -190,7 +190,7 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
             db.add(assoc)
 
         # create association mapped instances
-        for nutrient_item in food.nutrients:
+        for nutrient_item in body.nutrients:
             nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
 
             if nutrient is None:
@@ -230,11 +230,11 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
         200: {"model": ReturnModel[Brand], "description": "Brands getted successfully"},
     }
 )
-def search_brands(brand_name: str, db: DbDependency):
+def search_brands(query_brand_name: str, db: DbDependency):
     """Busca marcas pelo nome (parcial)."""
-    brands = db.query(Brand).filter(Brand.name.ilike(f"%{brand_name}%")).all()
+    brands = db.query(Brand).filter(Brand.name.ilike(f"%{query_brand_name}%")).all()
 
-    if not brands:
+    if brands is None:
         raise HTTPException(status_code=404, detail="Brand not found")
     
     return ReturnModel(
@@ -250,15 +250,15 @@ def search_brands(brand_name: str, db: DbDependency):
         200: {"model": ReturnModel, "description": "Brands created successfully"},
     }
 )
-def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):
+def create_brand(body: PostCreateBrandBodyRequest, db: DbDependency):
     """Cadastra uma nova marca."""
-    existing = db.query(Brand).filter(Brand.name.ilike(f"%{brand.name}%")).first()
+    existing = db.query(Brand).filter(Brand.name.ilike(f"%{body.name}%")).first()
 
     if existing is not None:
         raise HTTPException(status_code=400, detail="Brand already exists")
 
     new_brand = Brand(
-        name=brand.name
+        name=body.name
     )
 
     db.add(new_brand)
@@ -311,11 +311,11 @@ def list_nutrients(db: DbDependency):
         200: {"model": ReturnModel[Meal], "description": "Meal getted successfully"},
     }
 )
-def list_user_meals(user_id: int, db: DbDependency):
+def list_user_meals(query_user_id: int, db: DbDependency):
     """Busca uma refeição pelo ID do usuário."""
-    meal = db.query(Meal).filter(Meal.user_id == user_id).all()
+    meal = db.query(Meal).filter(Meal.user_id == query_user_id).all()
 
-    if not meal:
+    if meal is None:
         raise HTTPException(status_code=404, detail="Meal not found")
     
     return ReturnModel(
@@ -331,22 +331,22 @@ def list_user_meals(user_id: int, db: DbDependency):
         200: {"model": ReturnModel, "description": "Meal created successfully"},
     }
 )
-def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
+def create_meal(body: PostCreateMealBodyRequest, db: DbDependency):
     """Calcula calorias/nutrientes e cadastra uma refeição."""
 
-    if not meal.list_foods_ids:
+    if not body.list_foods_ids:
         raise HTTPException(status_code=400, detail="At least one food ID must be provided")
 
-    user = db.query(User).filter(User.id == meal.user_id).first()
+    user = db.query(User).filter(User.id == body.user_id).first()
 
     if user is None:
-        raise HTTPException(status_code=400, detail=f"User_id: {meal.user_id} dont exist")
+        raise HTTPException(status_code=400, detail=f"User_id: {body.user_id} dont exist")
 
     total_calories = 0.0
     total_nutrients: Dict[str, float] = {}
     foods: List[Food] = []
 
-    for food_id in meal.list_foods_ids:
+    for food_id in body.list_foods_ids:
         food = db.query(Food).filter(Food.id == food_id).first()
 
         if food is None:
@@ -363,11 +363,11 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
         total_calories += item_calories
 
     new_meal = Meal(
-        name = meal.name,
-        user_id = meal.user_id,
-        consumed_at = meal.consumed_at,
+        name = body.name,
+        user_id = body.user_id,
+        consumed_at = body.consumed_at,
         calories = total_calories,
-        weight_g = meal.weight_g
+        weight_g = body.weight_g
     )
     db.add(new_meal)
     db.flush()

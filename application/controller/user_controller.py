@@ -12,8 +12,14 @@ from shared.database import get_db
 from application.models.application_models import User, Nutricionist
 from application.models.return_models import ReturnModel, ReturnSuccessUserModel
 
-router = APIRouter(prefix="/users", tags=["users"])
+
+#region Setup
+
+router = APIRouter(tags=["User"])
+DbDependency = Annotated[Session, Depends(get_db)]
 password_hash = PasswordHash.recommended()
+
+#region Schemas
 
 class PostCreateUserBodyRequest(BaseModel):
     """Base model for user creation."""
@@ -45,33 +51,31 @@ class PostCreateNutricionistBodyRequest(BaseModel):
                 return datetime.fromisoformat(value)
         return value
 
-DbDependency = Annotated[Session, Depends(get_db)]
-
 #region User
 
 @router.post(
-    "/create_User",
+    "/user",
     responses = {
         200: {"model": ReturnModel, "description": "User created successfully"},
     }
 )
-def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
+def create_user(body: PostCreateUserBodyRequest, db: DbDependency):
     """Create a new user in the database."""
 
     new_user = User(
-        email = user.email,
-        birthdate = user.birthdate,
-        weight_kg = user.weight_kg,
-        height_m = user.height_m,
-        sex = user.sex,
-        password = password_hash.hash(user.password),
-        nutricionist_id = user.nutricionist_id,
+        email = body.email,
+        birthdate = body.birthdate,
+        weight_kg = body.weight_kg,
+        height_m = body.height_m,
+        sex = body.sex,
+        password = password_hash.hash(body.password),
+        nutricionist_id = body.nutricionist_id,
     )
 
     if new_user is None:
         raise HTTPException(status_code=400, detail="User creation failed")
 
-    if db.query(User).filter(User.email == user.email).first():
+    if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     db.add(new_user)
@@ -86,14 +90,14 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
 
 
 @router.get(
-    "/get_User/{user_id}",
+    "/user/{user_id}",
     responses = {
         200: {"model": ReturnModel[ReturnSuccessUserModel], "description": "User getted successfully"},
     }
 )
-def get_user(user_id: int, db: DbDependency):
+def get_user(route_user_id: int, db: DbDependency):
     """Retrieve a user by their ID."""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == route_user_id).first()
 
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -117,24 +121,24 @@ def get_user(user_id: int, db: DbDependency):
 #region Nutricionist
 
 @router.post(
-    "/create_Nutricionist",
+    "/nutricionist",
     responses = {
         200: {"model": ReturnModel, "description": "Nutricionist created successfully"},
     }
 )
-def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
+def create_nutricionist(body: PostCreateNutricionistBodyRequest, db: DbDependency):
     """Create a new nutricionist in the database."""
     new_nutricionist = Nutricionist(
-        email = nutricionist.email,
-        password = password_hash.hash(nutricionist.password),
-        phone = nutricionist.phone,
-        created_at = nutricionist.created_at
+        email = body.email,
+        password = password_hash.hash(body.password),
+        phone = body.phone,
+        created_at = body.created_at
     )
 
     if new_nutricionist is None:
         raise HTTPException(status_code=400, detail="Nutricionist creation failed")
 
-    if db.query(Nutricionist).filter(Nutricionist.email == nutricionist.email).first():
+    if db.query(Nutricionist).filter(Nutricionist.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     db.add(new_nutricionist)
