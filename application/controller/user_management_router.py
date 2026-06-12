@@ -47,6 +47,7 @@ class PostCreateNutricionistBodyRequest(BaseModel):
 
 DbDependency = Annotated[Session, Depends(get_db)]
 
+#region User
 
 @router.post(
     "/create_User",
@@ -113,6 +114,7 @@ def get_user(user_id: int, db: DbDependency):
         success = True
     )
 
+#region Nutricionist
 
 @router.post(
     "/create_Nutricionist",

@@ -7,7 +7,7 @@ from typing import Generic, TypeVar, Optional
 
 T = TypeVar("T")
 
-# region Default
+#region Default
 
 @dataclass
 class ReturnModel(Generic[T]):
@@ -33,7 +33,7 @@ class ReturnException(Exception, Generic[T]):
         # Inicializa a classe base Exception passando a mensagem de erro
         super().__init__(self.message)
 
-# region User
+#region User
 
 @dataclass
 class ReturnSuccessUserModel():

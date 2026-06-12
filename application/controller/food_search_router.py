@@ -14,7 +14,7 @@ from application.models.return_models import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
 
-# region Schemas
+#region Schemas
 
 class NutrientAmount(BaseModel):
     """TypedDict for nutrient amount input, allowing flexible formats."""
@@ -49,11 +49,11 @@ class PostCreateMealBodyRequest(BaseModel):
     weight_g: float = 0.0
     list_foods_ids: List[int] = Field(default_factory=list)
 
-# region Setup
+#region Setup
 
 DbDependency = Annotated[Session, Depends(get_db)]
 
-# region Helpers
+#region Helpers
 
 def normalize_text(value: str) -> str:
     """Normalize text for consistent comparisons."""
@@ -126,7 +126,7 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
         .all()
     )
 
-# region Foods
+#region Foods
 
 
 @router.get(
@@ -227,7 +227,7 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
             success=False,
         ) from err
 
-# region Brands
+#region Brands
 
 @router.get(
     "/brands",
@@ -276,7 +276,7 @@ def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):
         success=True
     )
 
-# region Categories
+#region Categories
 
 @router.get(
     "/categories",
@@ -292,7 +292,7 @@ def list_categories(db: DbDependency):
         success=True
     )
 
-# region Nutrients
+#region Nutrients
 
 @router.get(
     "/nutrients",
@@ -308,7 +308,7 @@ def list_nutrients(db: DbDependency):
         success=True
     )
 
-# region Meals
+#region Meals
 
 @router.get(
     "/meals",
