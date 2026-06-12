@@ -1,5 +1,6 @@
 """Controller for user management, including user and nutricionist creation and retrieval."""
 
+import re
 from datetime import datetime
 from typing import Annotated, Optional
 
@@ -18,6 +19,7 @@ from application.models.return_models import ReturnModel, ReturnSuccessUserModel
 router = APIRouter(tags=["User"])
 DbDependency = Annotated[Session, Depends(get_db)]
 password_hash = PasswordHash.recommended()
+EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 
 #region Schemas
 
@@ -61,6 +63,9 @@ class PostCreateNutricionistBodyRequest(BaseModel):
 )
 def create_user(body: PostCreateUserBodyRequest, db: DbDependency):
     """Create a new user in the database."""
+
+    if not re.fullmatch(EMAIL_REGEX, body.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
 
     new_user = User(
         email = body.email,
@@ -128,6 +133,10 @@ def get_user(route_user_id: int, db: DbDependency):
 )
 def create_nutricionist(body: PostCreateNutricionistBodyRequest, db: DbDependency):
     """Create a new nutricionist in the database."""
+
+    if not re.fullmatch(EMAIL_REGEX, body.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
+
     new_nutricionist = Nutricionist(
         email = body.email,
         password = password_hash.hash(body.password),
