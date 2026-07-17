@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
 
 from shared.database import get_db
-from application.models.application_models import User, Nutricionist
+from application.models.application_models import User, Nutricionist, UserAllergenAssociation, Allergen
 from application.models.return_model import ReturnModel
 
 
@@ -24,7 +24,22 @@ class PostCreateUserBodyRequest(BaseModel):
     height_m: float
     sex: str
     password: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    is_active: bool
     nutricionist_id: Optional[int] = None
+
+    @field_validator("created_at")
+    @classmethod
+    def parse_user_created_at(cls, value):
+        """Parse the user_created_at field to ensure it's a datetime object."""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.strptime(value, "%d/%m/%Y %H:%M:%S")
+            except ValueError:
+                return datetime.fromisoformat(value)
+        return value
 
 class PostCreateNutricionistBodyRequest(BaseModel):
     """Base model for nutricionist creation."""
@@ -64,6 +79,7 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
         height_m = user.height_m,
         sex = user.sex,
         password = password_hash.hash(user.password),
+        is_active = user.is_active,
         nutricionist_id = user.nutricionist_id,
     )
 
@@ -85,7 +101,8 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
             "weight_kg": new_user.weight_kg,
             "height_m": new_user.height_m,
             "sex": new_user.sex,
-            "created_at": new_user.created_at
+            "created_at": new_user.created_at,
+            "is_active": new_user.is_active
         },
         success = True
     )
@@ -98,6 +115,24 @@ def get_user(user_id: int, db: DbDependency):
         raise HTTPException(status_code=404, detail="User not found")
     return db_user
 
+@router.get("/get_Nutricionist/{nutricionist_id}")
+def get_nutricionist(nutricionist_id: int, db: DbDependency):
+    """Retrieve a nutricionist by their ID."""
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+    return db_nutricionist
+
+@router.get("/get_User_Allergens_by_food/{user_id}/{food_id}")
+def get_user_allergens_by_food(user_id: int, db: DbDependency):
+    """Retrieve a user's allergens by their ID and a specific food ID."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Assuming you have a relationship set up between User and Allergen
+    allergens = db.query(Allergen).join(UserAllergenAssociation).filter(UserAllergenAssociation.user_id == user_id).all()
+    return {"allergens": allergens}
 
 @router.post("/create_Nutricionist")
 def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
