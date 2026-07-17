@@ -82,7 +82,7 @@ class Nutricionist(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
     password: Mapped[str] = mapped_column(index=True)
-    created_at: Mapped[datetime] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(init=False, default=datetime.now)
     phone: Mapped[str] = mapped_column(index=True)
     email: Mapped[str] = mapped_column(index=True)
 

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator, Field
 from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
 
@@ -24,21 +24,17 @@ class PostCreateUserBodyRequest(BaseModel):
     height_m: float
     sex: str
     password: str
-    created_at: datetime = Field(default_factory=datetime.now)
     is_active: bool
     nutricionist_id: Optional[int] = None
 
-    @field_validator("created_at")
-    @classmethod
-    def parse_user_created_at(cls, value):
-        """Parse the user_created_at field to ensure it's a datetime object."""
-        if isinstance(value, datetime):
-            return value
+    @field_validator("birthdate")
+    def parse_birthdate(cls, value):
+        """Ensure birthdate is a datetime object."""
         if isinstance(value, str):
             try:
-                return datetime.strptime(value, "%d/%m/%Y %H:%M:%S")
+                return datetime.strptime(value, "%Y-%m-%d")
             except ValueError:
-                return datetime.fromisoformat(value)
+                raise ValueError("birthdate must be in YYYY-MM-DD format")
         return value
 
 class PostCreateNutricionistBodyRequest(BaseModel):
@@ -46,20 +42,6 @@ class PostCreateNutricionistBodyRequest(BaseModel):
     email: str
     password: str
     phone: str
-    created_at: datetime = Field(default_factory=datetime.now)
-
-    @field_validator("created_at")
-    @classmethod
-    def parse_nutricionist_created_at(cls, value):
-        """Parse the nutricionist_created_at field to ensure it's a datetime object."""
-        if isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.strptime(value, "%d/%m/%Y %H:%M:%S")
-            except ValueError:
-                return datetime.fromisoformat(value)
-        return value
 
 DbDependency = Annotated[Session, Depends(get_db)]
 
@@ -140,8 +122,7 @@ def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbD
     new_nutricionist = Nutricionist(
         email = nutricionist.email,
         password = nutricionist.password,
-        phone = nutricionist.phone,
-        created_at = nutricionist.created_at
+        phone = nutricionist.phone
     )
 
     if new_nutricionist is None:
