@@ -9,12 +9,17 @@ from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
 
 from shared.database import get_db
-from application.models.application_models import User, Nutricionist, UserAllergenAssociation, Allergen
+from application.models.application_models import AllergenFoodAssociation, User, Nutricionist, UserAllergenAssociation, Allergen
 from application.models.return_model import ReturnModel
 
 
 router = APIRouter(prefix="/users", tags=["users"])
 password_hash = PasswordHash.recommended()
+
+class PostAllergenUser(BaseModel):
+    """Base model for retrieving allergens by user."""
+    user_id: int
+    allergen_id: int
 
 class PostCreateUserBodyRequest(BaseModel):
     """Base model for user creation."""
@@ -106,14 +111,21 @@ def get_nutricionist(nutricionist_id: int, db: DbDependency):
     return db_nutricionist
 
 @router.get("/get_User_Allergens_by_food/{user_id}/{food_id}")
-def get_user_allergens_by_food(user_id: int, db: DbDependency):
+def get_user_allergens_by_food(user_id: int, food_id: int, db: DbDependency):
     """Retrieve a user's allergens by their ID and a specific food ID."""
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
     # Assuming you have a relationship set up between User and Allergen
-    allergens = db.query(Allergen).join(UserAllergenAssociation).filter(UserAllergenAssociation.user_id == user_id).all()
+    allergens = (
+    db.query(Allergen)
+    .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
+    .join(AllergenFoodAssociation, AllergenFoodAssociation.allergen_id == Allergen.id)
+    .filter(UserAllergenAssociation.user_id == user_id)
+    .filter(AllergenFoodAssociation.food_id == food_id)
+    .all()
+)
     return {"allergens": allergens}
 
 @router.post("/create_Nutricionist")
@@ -135,3 +147,19 @@ def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbD
     db.commit()
     db.refresh(new_nutricionist)
     return new_nutricionist
+
+@router.post("/add_allergen_to_user")
+def add_allergen_to_user(allergen_User: PostAllergenUser, db: DbDependency):
+    """Add an allergen to a user."""
+    new_association = UserAllergenAssociation(
+        user_id=allergen_User.user_id,
+        allergen_id=allergen_User.allergen_id
+    )
+
+    if new_association is None:
+        raise HTTPException(status_code=400, detail="Allergen association failed")
+
+    db.add(new_association)
+    db.commit()
+    db.refresh(new_association)
+    return new_association
