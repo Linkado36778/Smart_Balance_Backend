@@ -1,0 +1,51 @@
+image,ground_truth,model,language,top1,top1_conf,top2,top2_conf,top3,top3_conf,correct
+beef_steak_01.jpg,beef_steak,CLIP,EN,beef steak,0.894404411315918,pork chop,0.08120158314704895,grilled chicken,0.0058564296923577785,True
+beef_steak_02.jpg,beef_steak,CLIP,EN,beef steak,0.9849580526351929,pork chop,0.011821153573691845,turkey breast,0.0007940264185890555,True
+beef_steak_03.jpg,beef_steak,CLIP,EN,beef steak,0.9953235983848572,pork chop,0.0015695512993261218,kale,0.0006143755163066089,True
+beef_steak_04.jpg,beef_steak,CLIP,EN,beef steak,0.9982929825782776,pork chop,0.0003488879883661866,lettuce,0.0002234237763332203,True
+beef_steak_05.jpg,beef_steak,CLIP,EN,beef steak,0.9882336854934692,pork chop,0.008184350095689297,kale,0.0009326354484073818,True
+black_beans_01.webp,black_beans,CLIP,EN,kidney beans,0.43266940116882324,black beans,0.3060458302497864,pinto beans,0.1910497546195984,False
+black_beans_02.jpg,black_beans,CLIP,EN,brown rice,0.30607566237449646,lentils,0.1815556436777115,kidney beans,0.14323386549949646,False
+black_beans_03.webp,black_beans,CLIP,EN,brown rice,0.25499239563941956,lentils,0.2230510711669922,chickpeas,0.1021687388420105,False
+black_beans_04.jpg,black_beans,CLIP,EN,black beans,0.5044077038764954,kidney beans,0.32145261764526367,pinto beans,0.08180347830057144,True
+black_beans_05.jpg,black_beans,CLIP,EN,black beans,0.7411623001098633,kidney beans,0.14108845591545105,lentils,0.08444403856992722,True
+cherry_tomato_01.webp,cherry_tomato,CLIP,EN,cherry tomato,0.6764960885047913,tomato,0.10950721800327301,chickpeas,0.05373737961053848,True
+cherry_tomato_02.jpg,cherry_tomato,CLIP,EN,cherry tomato,0.8172570466995239,tomato,0.12040777504444122,chickpeas,0.03982755169272423,True
+cherry_tomato_03.jpg,cherry_tomato,CLIP,EN,cherry tomato,0.7199609279632568,tomato,0.2494785487651825,chickpeas,0.010608911514282227,True
+cherry_tomato_04.webp,cherry_tomato,CLIP,EN,cherry tomato,0.5125358700752258,tomato,0.47208371758461,red bell pepper,0.007518228609114885,True
+cherry_tomato_05.webp,cherry_tomato,CLIP,EN,cherry tomato,0.48879706859588623,tomato,0.46055153012275696,red bell pepper,0.011416721157729626,True
+fries_01.webp,french_fries,CLIP,EN,french fries,0.9388919472694397,penne pasta,0.03547367826104164,chickpeas,0.00833370815962553,True
+fries_02.jpg,french_fries,CLIP,EN,french fries,0.8969563245773315,sweet potato,0.024818694218993187,penne pasta,0.019024943932890892,True
+fries_03.jpg,french_fries,CLIP,EN,french fries,0.7018267512321472,penne pasta,0.16535168886184692,sweet potato,0.05178665369749069,True
+fries_04.webp,french_fries,CLIP,EN,french fries,0.4745098948478699,penne pasta,0.4071926474571228,macaroni,0.08672046661376953,True
+fries_05.webp,french_fries,CLIP,EN,french fries,0.8565710186958313,penne pasta,0.12371844053268433,macaroni,0.006303844507783651,True
+grilled_chicken_01.jpg,grilled_chicken,CLIP,EN,grilled chicken,0.8989303112030029,turkey breast,0.07693472504615784,roasted chicken,0.010052373632788658,True
+grilled_chicken_02.jpg,grilled_chicken,CLIP,EN,grilled chicken,0.6487022638320923,turkey breast,0.2758786082267761,roasted chicken,0.027577903121709824,True
+grilled_chicken_03.jpg,grilled_chicken,CLIP,EN,fried chicken,0.7253552079200745,grilled chicken,0.14455370604991913,sweet potato,0.025306111201643944,False
+grilled_chicken_04.jpg,grilled_chicken,CLIP,EN,grilled chicken,0.9727951288223267,roasted chicken,0.009259496815502644,turkey breast,0.008693134412169456,True
+grilled_chicken_05.jpg,grilled_chicken,CLIP,EN,turkey breast,0.5733438730239868,grilled chicken,0.3128814101219177,roasted chicken,0.09399404376745224,False
+mashed_potatoes_01.jpg,mashed_potatoes,CLIP,EN,mashed potatoes,0.8780584931373596,scrambled eggs,0.020593004301190376,fettuccine,0.018429193645715714,True
+mashed_potatoes_02.jpg,mashed_potatoes,CLIP,EN,mashed potatoes,0.8587169051170349,cottage cheese,0.11770779639482498,yogurt,0.010558641515672207,True
+mashed_potatoes_03.jpg,mashed_potatoes,CLIP,EN,mashed potatoes,0.9505433440208435,cottage cheese,0.030235035344958305,yogurt,0.00707442918792367,True
+mashed_potatoes_04.jpg,mashed_potatoes,CLIP,EN,mashed potatoes,0.9742578864097595,scrambled eggs,0.005528652109205723,mozzarella cheese,0.004676461685448885,True
+mashed_potatoes_05.webp,mashed_potatoes,CLIP,EN,green salad,0.3289566934108734,mashed potatoes,0.19900353252887726,cottage cheese,0.15090955793857574,False
+ramen_noodles_01.jpg,ramen_noodles,CLIP,EN,ramen noodles,0.707784116268158,macaroni,0.23026031255722046,linguine,0.022678550332784653,True
+ramen_noodles_02.jpg,ramen_noodles,CLIP,EN,ramen noodles,0.9532713890075684,macaroni,0.0208235252648592,spaghetti,0.009628199972212315,True
+ramen_noodles_03.jpg,ramen_noodles,CLIP,EN,ramen noodles,0.8014774918556213,macaroni,0.10734812170267105,brown rice,0.03848486393690109,True
+ramen_noodles_04.jpg,ramen_noodles,CLIP,EN,ramen noodles,0.7013628482818604,linguine,0.1378607302904129,macaroni,0.06338046491146088,True
+ramen_noodles_05.jpg,ramen_noodles,CLIP,EN,linguine,0.42260926961898804,spaghetti,0.21279089152812958,penne pasta,0.13960543274879456,False
+scrambled_eggs_01.jpg,scrambled_eggs,CLIP,EN,scrambled eggs,0.9803045392036438,fried egg,0.008890220895409584,omelet,0.006647871807217598,True
+scrambled_eggs_02.jpg,scrambled_eggs,CLIP,EN,scrambled eggs,0.9953487515449524,macaroni,0.001214371994137764,omelet,0.0011559274280443788,True
+scrambled_eggs_03.webp,scrambled_eggs,CLIP,EN,scrambled eggs,0.48060089349746704,macaroni,0.15256482362747192,mashed potatoes,0.07480237632989883,True
+scrambled_eggs_04.jpg,scrambled_eggs,CLIP,EN,scrambled eggs,0.8907989859580994,omelet,0.08561956137418747,fried egg,0.010799400508403778,True
+scrambled_eggs_05.webp,scrambled_eggs,CLIP,EN,scrambled eggs,0.988649845123291,omelet,0.00766338687390089,fried egg,0.0023622538428753614,True
+spinach_01.jpg,spinach,CLIP,EN,green salad,0.35678771138191223,kale,0.3237016797065735,spinach,0.18688803911209106,False
+spinach_02.jpg,spinach,CLIP,EN,green salad,0.6739059686660767,kale,0.09391116350889206,spinach,0.09264108538627625,False
+spinach_03.webp,spinach,CLIP,EN,arugula,0.6399016976356506,spinach,0.1804085671901703,green salad,0.14488358795642853,False
+spinach_04.jpg,spinach,CLIP,EN,spinach,0.6589469909667969,kale,0.23856604099273682,arugula,0.07393405586481094,True
+spinach_05.jpg,spinach,CLIP,EN,spinach,0.32522469758987427,green salad,0.2895600199699402,arugula,0.21484234929084778,True
+white_rice_01.webp,white_rice,CLIP,EN,white rice,0.9562129974365234,brown rice,0.030833009630441666,fried rice,0.011783321388065815,True
+white_rice_02.jpg,white_rice,CLIP,EN,white rice,0.8656333684921265,brown rice,0.06735566258430481,fried rice,0.033267177641391754,True
+white_rice_03.jpg,white_rice,CLIP,EN,white rice,0.9741697907447815,brown rice,0.01742921955883503,quinoa,0.0025544213131070137,True
+white_rice_04.jpg,white_rice,CLIP,EN,white rice,0.9167622327804565,cottage cheese,0.02989831380546093,brown rice,0.027615999802947044,True
+white_rice_05.jpg,white_rice,CLIP,EN,white rice,0.953886091709137,brown rice,0.031836558133363724,fried rice,0.008547570556402206,True

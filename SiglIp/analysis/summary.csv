@@ -1,0 +1,5 @@
+file,Modelo,Linguagem,Acurácia do TOP 1,Acurácia do TOP 3,Amostras
+test01_clip_results.csv,CLIP,EN,80.0,94.0,50
+test01_siglip_results.csv,SigLIP,EN,88.0,100.0,50
+test02_clip_results.csv,CLIP,PT,30.0,40.0,50
+test02_siglip_results.csv,SigLIP,PT,72.0,96.0,50

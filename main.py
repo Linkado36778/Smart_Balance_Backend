@@ -6,6 +6,7 @@ from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 
 from application.controller import user_management_router
 from application.controller import food_search_router
+from application.controller import food_recognition
 from application.models.return_model import ReturnException
 
 app = FastAPI(
@@ -16,6 +17,7 @@ app = FastAPI(
 )
 app.include_router(user_management_router.router)
 app.include_router(food_search_router.router)
+app.include_router(food_recognition.router)
 
 @app.exception_handler(ReturnException)
 async def return_exception_handler(request: Request, exc: ReturnException):

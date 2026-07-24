@@ -1,0 +1,51 @@
+image,ground_truth,model,language,top1,top1_conf,top2,top2_conf,top3,top3_conf,correct
+beef_steak_01.jpg,bife bovino,SigLIP,PT,bife bovino,0.7681271433830261,costeleta de porco,0.17758427560329437,frango grelhado,0.017005885019898415,True
+beef_steak_02.jpg,bife bovino,SigLIP,PT,bife bovino,0.9235124588012695,costeleta de porco,0.06077467277646065,frango grelhado,0.004652043338865042,True
+beef_steak_03.jpg,bife bovino,SigLIP,PT,bife bovino,0.9661704897880554,peito de peru,0.008248738944530487,costeleta de porco,0.008160153403878212,True
+beef_steak_04.jpg,bife bovino,SigLIP,PT,bife bovino,0.9844914078712463,lámen,0.005411566235125065,fettuccine,0.002541546244174242,True
+beef_steak_05.jpg,bife bovino,SigLIP,PT,bife bovino,0.9798635840415955,fettuccine,0.005157843232154846,lámen,0.00426016841083765,True
+black_beans_01.webp,feijão preto,SigLIP,PT,feijão preto,0.9938328266143799,feijão carioca,0.003840210847556591,feijão vermelho,0.001897271373309195,True
+black_beans_02.jpg,feijão preto,SigLIP,PT,feijão preto,0.9144411683082581,lámen,0.04583073779940605,feijão vermelho,0.015818947926163673,True
+black_beans_03.webp,feijão preto,SigLIP,PT,feijão preto,0.8273465633392334,lámen,0.08895237743854523,feijão carioca,0.01946304179728031,True
+black_beans_04.jpg,feijão preto,SigLIP,PT,feijão preto,0.995402455329895,feijão carioca,0.00288298144005239,feijão vermelho,0.001677967607975006,True
+black_beans_05.jpg,feijão preto,SigLIP,PT,feijão preto,0.9819520115852356,feijão vermelho,0.011512074619531631,feijão carioca,0.006240779533982277,True
+cherry_tomato_01.webp,tomate cereja,SigLIP,PT,tomate,0.3823901116847992,tomate cereja,0.23904000222682953,salada verde,0.11170952767133713,False
+cherry_tomato_02.jpg,tomate cereja,SigLIP,PT,tomate cereja,0.7210643291473389,tomate,0.18157999217510223,lámen,0.013437432236969471,True
+cherry_tomato_03.jpg,tomate cereja,SigLIP,PT,tomate,0.4527103006839752,tomate cereja,0.38766223192214966,queijo muçarela,0.03902708739042282,False
+cherry_tomato_04.webp,tomate cereja,SigLIP,PT,tomate cereja,0.6843905448913574,tomate,0.29465043544769287,pimentão vermelho,0.007474409881979227,True
+cherry_tomato_05.webp,tomate cereja,SigLIP,PT,tomate,0.5547695159912109,tomate cereja,0.27042335271835327,pimentão vermelho,0.07858462631702423,False
+fries_01.webp,batata frita,SigLIP,PT,batata frita,0.9661136269569397,batata-doce,0.024478398263454437,purê de batatas,0.005470799282193184,True
+fries_02.jpg,batata frita,SigLIP,PT,batata frita,0.9220843315124512,batata-doce,0.07069262862205505,purê de batatas,0.004399764817208052,True
+fries_03.jpg,batata frita,SigLIP,PT,batata frita,0.9277271032333374,batata-doce,0.03830533102154732,purê de batatas,0.011914210394024849,True
+fries_04.webp,batata frita,SigLIP,PT,batata frita,0.8795464038848877,purê de batatas,0.03650748357176781,batata-doce,0.03507585451006889,True
+fries_05.webp,batata frita,SigLIP,PT,batata frita,0.9438600540161133,batata-doce,0.048556867986917496,purê de batatas,0.004329137038439512,True
+grilled_chicken_01.jpg,frango grelhado,SigLIP,PT,frango grelhado,0.8773654699325562,frango assado,0.10873091220855713,peito de peru,0.006020580418407917,True
+grilled_chicken_02.jpg,frango grelhado,SigLIP,PT,frango grelhado,0.5209757089614868,frango frito,0.29535260796546936,frango assado,0.1374357044696808,True
+grilled_chicken_03.jpg,frango grelhado,SigLIP,PT,frango frito,0.26576492190361023,frango assado,0.23390570282936096,omelete,0.20424900949001312,False
+grilled_chicken_04.jpg,frango grelhado,SigLIP,PT,frango grelhado,0.8586946725845337,frango assado,0.08165771514177322,peito de peru,0.015587820671498775,True
+grilled_chicken_05.jpg,frango grelhado,SigLIP,PT,frango grelhado,0.5328823924064636,frango assado,0.3773171007633209,purê de batatas,0.03150974586606026,True
+mashed_potatoes_01.jpg,purê de batatas,SigLIP,PT,purê de batatas,0.9864209890365601,batata-doce,0.009576049633324146,cuscuz,0.0014499551616609097,True
+mashed_potatoes_02.jpg,purê de batatas,SigLIP,PT,purê de batatas,0.9976644515991211,batata-doce,0.0018805561121553183,ovo cozido,0.0001188574024126865,True
+mashed_potatoes_03.jpg,purê de batatas,SigLIP,PT,purê de batatas,0.9902034997940063,batata-doce,0.006314214318990707,cuscuz,0.002130906330421567,True
+mashed_potatoes_04.jpg,purê de batatas,SigLIP,PT,purê de batatas,0.9962502121925354,batata-doce,0.0027249797713011503,cuscuz,0.0003461382875684649,True
+mashed_potatoes_05.webp,purê de batatas,SigLIP,PT,ovo cozido,0.34208282828330994,omelete,0.2956465482711792,purê de batatas,0.14114268124103546,False
+ramen_noodles_01.jpg,lámen,SigLIP,PT,macarrão,0.7263637781143188,lámen,0.18699468672275543,espaguete,0.03459861874580383,False
+ramen_noodles_02.jpg,lámen,SigLIP,PT,lámen,0.49258190393447876,macarrão,0.3536647856235504,espaguete,0.09536654502153397,True
+ramen_noodles_03.jpg,lámen,SigLIP,PT,macarrão,0.4987948536872864,espaguete,0.21765229105949402,lámen,0.19511491060256958,False
+ramen_noodles_04.jpg,lámen,SigLIP,PT,macarrão,0.7231931090354919,lámen,0.12714257836341858,espaguete,0.09982790797948837,False
+ramen_noodles_05.jpg,lámen,SigLIP,PT,espaguete,0.7236342430114746,macarrão,0.21703168749809265,lámen,0.019169507548213005,False
+scrambled_eggs_01.jpg,ovos mexidos,SigLIP,PT,ovo cozido,0.6529120802879333,ovos mexidos,0.20101797580718994,ovo frito,0.10287566483020782,False
+scrambled_eggs_02.jpg,ovos mexidos,SigLIP,PT,ovos mexidos,0.48561856150627136,ovo cozido,0.4401564300060272,omelete,0.04801172763109207,True
+scrambled_eggs_03.webp,ovos mexidos,SigLIP,PT,ovo cozido,0.3677327334880829,ovos mexidos,0.3121073842048645,ovo frito,0.15177947282791138,False
+scrambled_eggs_04.jpg,ovos mexidos,SigLIP,PT,ovos mexidos,0.9542826414108276,ovo cozido,0.036844223737716675,omelete,0.004608487244695425,True
+scrambled_eggs_05.webp,ovos mexidos,SigLIP,PT,ovo frito,0.49678805470466614,omelete,0.25993454456329346,ovo cozido,0.154168039560318,False
+spinach_01.jpg,espinafre,SigLIP,PT,espinafre,0.8319608569145203,salada verde,0.10484448820352554,couve kale,0.03320741653442383,True
+spinach_02.jpg,espinafre,SigLIP,PT,espinafre,0.7893950343132019,salada verde,0.10408945381641388,feijão preto,0.03345758467912674,True
+spinach_03.webp,espinafre,SigLIP,PT,espinafre,0.8993953466415405,salada verde,0.04601854830980301,rúcula,0.03388059884309769,True
+spinach_04.jpg,espinafre,SigLIP,PT,espinafre,0.9340866208076477,couve kale,0.03480479493737221,salada verde,0.00899444054812193,True
+spinach_05.jpg,espinafre,SigLIP,PT,espinafre,0.8660091757774353,couve kale,0.10555998235940933,salada verde,0.01464992668479681,True
+white_rice_01.webp,arroz branco,SigLIP,PT,arroz branco,0.5905376672744751,arroz frito,0.29698488116264343,arroz integral,0.11090800911188126,True
+white_rice_02.jpg,arroz branco,SigLIP,PT,arroz frito,0.6791152358055115,arroz branco,0.16445861756801605,arroz integral,0.1443365514278412,False
+white_rice_03.jpg,arroz branco,SigLIP,PT,arroz branco,0.8514800071716309,arroz frito,0.09104940295219421,arroz integral,0.046744078397750854,True
+white_rice_04.jpg,arroz branco,SigLIP,PT,cuscuz,0.5088183879852295,arroz branco,0.3451196849346161,arroz integral,0.04298380762338638,False
+white_rice_05.jpg,arroz branco,SigLIP,PT,arroz branco,0.6100572347640991,arroz frito,0.262794554233551,arroz integral,0.11758571863174438,True

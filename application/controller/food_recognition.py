@@ -1,18 +1,22 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
-import base64
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
-app = FastAPI()
+from SiglIp.test_01_Siglip import image_recognition_endpoint
 
-@app.post("/image_to_byte")
-async def image_recognition_endpoint(bytes: str):
-    try:
-        return {"image_b64": bytes}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-async def image_to_byte_endpoint(file: UploadFile = File(...)):
+router = APIRouter(tags=["food recognition"])
+
+
+@router.post("/food-recognition/image")
+async def recognize_food_from_image(file: UploadFile = File(...)):
     try:
         contents = await file.read()
-        byte_data = base64.b64encode(contents).decode("ascii")
-        return {"image_b64": byte_data}
+
+        if not contents:
+            raise HTTPException(status_code=400, detail="Empty image file.")
+
+        return image_recognition_endpoint(contents)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
