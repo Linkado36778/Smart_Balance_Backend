@@ -5,6 +5,10 @@ from io import BytesIO
 import base64
 import binascii
 
+from application.models.application_models import Food
+from sqlalchemy.orm import Session
+from fastapi import HTTPException
+
 # ----------------------------
 # CONFIG
 # ----------------------------
@@ -122,7 +126,7 @@ def _get_model():
     return processor, model
 
 
-def image_recognition_endpoint(image_data: bytes | str, top_k: int = 3):
+def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int = 3):
     image_bytes = _normalize_image_bytes(image_data)
     top_k = min(top_k, len(LABELS))
 
@@ -162,10 +166,26 @@ def image_recognition_endpoint(image_data: bytes | str, top_k: int = 3):
         for prob, index in zip(top_confidences, top_indices)
     ]
 
+    recognized_food = recognize_food_from_database(db, predictions[0]["label"])
+
     return {
         "model": MODEL_NAME,
         "language": LABEL_LANGUAGE,
-        "recognized_food": predictions[0]["label"],
+        "recognized_food": recognized_food,
         "confidence": predictions[0]["confidence"],
         "predictions": predictions
     }
+
+def recognize_food_from_database(db: Session, prediction: str):
+    db_search = db.query(Food).filter(Food.name == prediction).first()
+
+    if not db_search:
+        raise HTTPException(status_code=404, detail="Food not found in the database.")
+    else:
+        return {
+            "message": "Food found in the database.",
+            "food_id": db_search.id,
+            "food_name": db_search.name,
+            "category_id": db_search.category_id,
+            "brand_id": db_search.brand_id
+        }
