@@ -31,15 +31,13 @@ engine = create_engine(
 SESSEON_LOCAL = sessionmaker(autoflush=False, autocommit=False, bind=engine)
 
 DEFAULT_CATEGORIES = [
+    "Carnes e derivados",
     "Cereais",
-    "Legumes",
-    "Proteinas",
-    "Laticinios",
+    "Frango",
     "Frutas",
-    "Verduras",
-    "Gorduras",
-    "Bebidas",
-    "Outros",
+    "Hortaliças",
+    "Leguminosas",
+    "Ovos",
 ]
 
 DEFAULT_NUTRIENTS = [
@@ -52,7 +50,6 @@ DEFAULT_NUTRIENTS = [
     {"name": "Calcio", "unit": "mg", "calories_per_unit": 0.0},
     {"name": "Ferro", "unit": "mg", "calories_per_unit": 0.0},
     {"name": "Vitamina C", "unit": "mg", "calories_per_unit": 0.0},
-    {"name": "Vitamina D", "unit": "ug", "calories_per_unit": 0.0},
 ]
 
 def get_db():

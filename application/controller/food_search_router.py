@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
-from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation
+from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation
 from application.models.return_model import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
@@ -129,23 +129,63 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
         .all()
     )
 
+# Função integrada no list_foods para buscar os alérgenos do usuário para um alimento específico
+# def get_user_allergens_by_food(user_id: int, food_id: int, db: DbDependency):
+#     """Retrieve a user's allergens by their ID and a specific food ID."""
+#     db_user = db.query(User).filter(User.id == user_id).first()
+#     if db_user is None:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     # Assuming you have a relationship set up between User and Allergen
+#     allergens = (
+#     db.query(Allergen)
+#     .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
+#     .join(AllergenFoodAssociation, AllergenFoodAssociation.allergen_id == Allergen.id)
+#     .filter(UserAllergenAssociation.user_id == user_id)
+#     .filter(AllergenFoodAssociation.food_id == food_id)
+#     .all()
+# )
+#     return allergens
+
 # region Foods
 
 @router.get("/foods")
-def list_foods(db: DbDependency, name: Optional[str] = None, food_id: Optional[int] = None):
-    """Lista todos os alimentos. Filtra por nome (parcial) ou por food_id."""
+def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
+    """Lista alimentos e informa se o usuario e alergico a cada um."""
+
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
     query = db.query(Food)
-
-    if food_id is not None:
-        food = query.filter(Food.id == food_id).first()
-        if not food:
-            raise HTTPException(status_code=404, detail="Food not found")
-        return food
-
     if name:
         query = query.filter(Food.name.ilike(f"%{name}%"))
 
-    return query.order_by(Food.id).all()
+    foods = query.order_by(Food.id).all()
+
+    allergic_food_ids = {
+        food_id
+        for (food_id,) in (
+            db.query(AllergenFoodAssociation.food_id)
+            .join(
+                UserAllergenAssociation,
+                UserAllergenAssociation.allergen_id == AllergenFoodAssociation.allergen_id,
+            )
+            .filter(UserAllergenAssociation.user_id == user_id)
+            .all()
+        )
+    }
+
+    return [
+        {
+            "id": food.id,
+            "name": food.name,
+            "category_id": food.category_id,
+            "brand_id": food.brand_id,
+            "user_allergic": food.id in allergic_food_ids,
+        }
+        for food in foods
+    ]
 
 
 @router.post("/foods")

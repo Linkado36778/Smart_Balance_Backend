@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
 
 from shared.database import get_db
-from application.models.application_models import AllergenFoodAssociation, User, Nutricionist, UserAllergenAssociation, Allergen
+from application.models.application_models import User, Nutricionist, UserAllergenAssociation
 from application.models.return_model import ReturnModel
 
 
@@ -110,23 +110,25 @@ def get_nutricionist(nutricionist_id: int, db: DbDependency):
         raise HTTPException(status_code=404, detail="Nutricionist not found")
     return db_nutricionist
 
-@router.get("/get_User_Allergens_by_food/{user_id}/{food_id}")
-def get_user_allergens_by_food(user_id: int, food_id: int, db: DbDependency):
-    """Retrieve a user's allergens by their ID and a specific food ID."""
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
+# Endpoint abaixo descontinuado, pois não é necessário para a funcionalidade atual do sistema.
 
-    # Assuming you have a relationship set up between User and Allergen
-    allergens = (
-    db.query(Allergen)
-    .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
-    .join(AllergenFoodAssociation, AllergenFoodAssociation.allergen_id == Allergen.id)
-    .filter(UserAllergenAssociation.user_id == user_id)
-    .filter(AllergenFoodAssociation.food_id == food_id)
-    .all()
-)
-    return {"allergens": allergens}
+# @router.get("/get_User_Allergens_by_food/{user_id}/{food_id}")
+# def get_user_allergens_by_food(user_id: int, food_id: int, db: DbDependency):
+#     """Retrieve a user's allergens by their ID and a specific food ID."""
+#     db_user = db.query(User).filter(User.id == user_id).first()
+#     if db_user is None:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     # Assuming you have a relationship set up between User and Allergen
+#     allergens = (
+#     db.query(Allergen)
+#     .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
+#     .join(AllergenFoodAssociation, AllergenFoodAssociation.allergen_id == Allergen.id)
+#     .filter(UserAllergenAssociation.user_id == user_id)
+#     .filter(AllergenFoodAssociation.food_id == food_id)
+#     .all()
+# )
+#     return allergens
 
 @router.post("/create_Nutricionist")
 def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
