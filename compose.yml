@@ -1,0 +1,15 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: linkado36778/sb-backend:latest
+
+    container_name: sb-backend
+
+    env_file:
+      - .env
+
+    ports:
+      - "127.0.0.1:8000:8000"
