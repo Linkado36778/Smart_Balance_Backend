@@ -1,7 +1,10 @@
 """Main application entry point for the Smart Balance API."""
 
+from pathlib import Path
+
 from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 
 from application.controller import user_management_router
@@ -18,6 +21,16 @@ app = FastAPI(
 app.include_router(user_management_router.router)
 app.include_router(food_search_router.router)
 app.include_router(food_recognition.router)
+
+BASE_DIR = Path(__file__).resolve().parent
+
+IMAGES_DIR = BASE_DIR / "images"
+
+app.mount(
+    "/images",
+    StaticFiles(directory=IMAGES_DIR),
+    name="images",
+)
 
 @app.exception_handler(ReturnException)
 async def return_exception_handler(request: Request, exc: ReturnException):

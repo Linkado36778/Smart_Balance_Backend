@@ -14,6 +14,8 @@ from application.models.return_model import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
 
+BASE_URL = "http://localhost:8000" ###Alterar para a URL do seu servidor FastAPI posteriormente
+
 # region Schemas
 
 class NutrientAmount(BaseModel):
@@ -29,6 +31,7 @@ class PostCreateFoodBodyRequest(BaseModel):
     name: str
     category_id: Optional[int] = None
     brand_id: Optional[int] = None
+    image_url: Optional[str] = None
     nutrients: List[NutrientAmount] = Field(default_factory=list)
     allergen_ids: List[int] = Field(default_factory=list)
 
@@ -182,6 +185,7 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
             "name": food.name,
             "category_id": food.category_id,
             "brand_id": food.brand_id,
+            "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
             "user_allergic": food.id in allergic_food_ids,
         }
         for food in foods

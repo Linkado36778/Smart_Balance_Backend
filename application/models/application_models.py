@@ -132,7 +132,7 @@ class Food(Base):
     brand_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("Brand.id"), index=True, default=None
     )
-    image_url: Mapped[str] = mapped_column(index=True)
+    image_url: Mapped[Optional[str]] = mapped_column(index=True, default=None)
 
 
 class Brand(Base):
