@@ -94,7 +94,7 @@ O workflow em `.github/workflows/deploy.yml` publica a imagem:
 linkado36778/sb-backend:latest
 ```
 
-Ele roda automaticamente quando houver push na branch `main` ou em tags no formato `v*.*.*`.
+Ele roda automaticamente quando houver push na branch `untested` ou em tags no formato `v*.*.*`.
 
 Antes de usar o workflow, configure estes secrets no GitHub:
 
