@@ -1,6 +1,7 @@
 """Food search and meal management endpoints."""
 
 from datetime import datetime
+import os
 from typing import Annotated, Any, Dict, List, Optional, Union
 from unicodedata import normalize
 
@@ -14,7 +15,7 @@ from application.models.return_model import ReturnModel, ReturnException
 
 router = APIRouter(tags=["food search"])
 
-BASE_URL = "http://localhost:8000" ###Alterar para a URL do seu servidor FastAPI posteriormente
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")  # Default to localhost if not set
 
 # region Schemas
 

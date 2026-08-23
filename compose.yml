@@ -1,15 +1,32 @@
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
     image: linkado36778/sb-backend:latest
-
     container_name: sb-backend
-
-    env_file:
-      - .env
-
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SQLALCHEMY_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      BASE_URL: ${BASE_URL}
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
+
+  db:
+    image: postgres:18-alpine
+    container_name: sb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - sb-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  sb-postgres-data:

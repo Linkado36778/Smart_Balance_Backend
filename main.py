@@ -6,11 +6,13 @@ from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
+from sqlalchemy import text
 
 from application.controller import user_management_router
 from application.controller import food_search_router
 from application.controller import food_recognition
 from application.models.return_model import ReturnException
+from shared.database import engine, initialize_database
 
 app = FastAPI(
     docs_url=None,  # Disable default Swagger UI
@@ -21,6 +23,12 @@ app = FastAPI(
 app.include_router(user_management_router.router)
 app.include_router(food_search_router.router)
 app.include_router(food_recognition.router)
+
+
+@app.on_event("startup")
+def startup_event():
+    """Initializes database tables and seed data when the API starts."""
+    initialize_database()
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -82,6 +90,28 @@ def read_root():
     return {
         "message": "API running",
         "routes": ["/users/create_User", "/users/get_User/{user_id}"]
+    }
+
+
+@app.get("/health")
+def health_check():
+    """Checks whether the API and database connection are healthy."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "database": "unavailable",
+                "detail": str(exc),
+            },
+        )
+
+    return {
+        "status": "healthy",
+        "database": "available",
     }
 
 
