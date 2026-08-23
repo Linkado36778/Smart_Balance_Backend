@@ -119,17 +119,33 @@ Depois que o GitHub Actions terminar, a imagem ficara disponivel no Docker Hub.
 
 ## Rodando a Imagem em Outra Maquina
 
-Na outra maquina, voce nao precisa do codigo inteiro para rodar a API. O minimo necessario e:
+Na outra maquina, a pessoa precisa ter o Docker Desktop instalado e rodando.
+
+Ela nao precisa do codigo inteiro para executar a API. O minimo necessario e:
 
 ```text
 compose.yml
 .env
-backups/smart-balance.sql
+smart-balance.sql
 ```
 
 Se quiser manter simples, copie o projeto inteiro.
 
-Na pasta onde esta o `compose.yml`, crie o `.env`:
+Crie uma pasta para o deploy, por exemplo:
+
+```text
+SmartBalanceDeploy
+```
+
+Coloque dentro dela os arquivos:
+
+```text
+compose.yml
+.env
+smart-balance.sql
+```
+
+O arquivo `.env` pode ser assim:
 
 ```env
 POSTGRES_DB=Smart-Balance
@@ -138,16 +154,56 @@ POSTGRES_PASSWORD=change-this-password
 BASE_URL=http://localhost:8000
 ```
 
-Baixe a imagem e suba os containers:
+Dentro da pasta onde esta o `compose.yml`, baixe a imagem publicada no Docker Hub:
 
 ```powershell
 docker compose pull
+```
+
+Esse comando baixa a imagem:
+
+```text
+linkado36778/sb-backend:latest
+```
+
+Suba apenas o banco:
+
+```powershell
+docker compose up -d db
+```
+
+Copie o dump SQL para dentro do container do Postgres:
+
+```powershell
+docker cp smart-balance.sql sb-postgres:/tmp/smart-balance.sql
+```
+
+Restaure os dados:
+
+```powershell
+docker exec -it sb-postgres psql -U postgres -d Smart-Balance -f /tmp/smart-balance.sql
+```
+
+Suba a API:
+
+```powershell
 docker compose up -d
 ```
 
 Teste:
 
 ```powershell
+curl http://localhost:8000/health
+```
+
+Resumo do fluxo:
+
+```powershell
+docker compose pull
+docker compose up -d db
+docker cp smart-balance.sql sb-postgres:/tmp/smart-balance.sql
+docker exec -it sb-postgres psql -U postgres -d Smart-Balance -f /tmp/smart-balance.sql
+docker compose up -d
 curl http://localhost:8000/health
 ```
 
