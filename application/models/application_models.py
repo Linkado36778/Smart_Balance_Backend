@@ -85,6 +85,7 @@ class Nutricionist(Base):
     created_at: Mapped[datetime] = mapped_column(init=False, default=datetime.now)
     phone: Mapped[str] = mapped_column(index=True)
     email: Mapped[str] = mapped_column(index=True)
+    crn: Mapped[str] = mapped_column(index=True)
 
 
 class User(Base):

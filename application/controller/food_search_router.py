@@ -32,7 +32,6 @@ class PostCreateFoodBodyRequest(BaseModel):
     name: str
     category_id: Optional[int] = None
     brand_id: Optional[int] = None
-    image_url: Optional[str] = None
     nutrients: List[NutrientAmount] = Field(default_factory=list)
     allergen_ids: List[int] = Field(default_factory=list)
 

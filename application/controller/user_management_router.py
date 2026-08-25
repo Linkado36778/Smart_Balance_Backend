@@ -11,7 +11,7 @@ from pwdlib import PasswordHash
 from shared.database import get_db
 from application.models.application_models import User, Nutricionist, UserAllergenAssociation
 from application.models.return_model import ReturnModel
-
+import re
 
 router = APIRouter(prefix="/users", tags=["users"])
 password_hash = PasswordHash.recommended()
@@ -47,8 +47,15 @@ class PostCreateNutricionistBodyRequest(BaseModel):
     email: str
     password: str
     phone: str
+    crn: str
 
 DbDependency = Annotated[Session, Depends(get_db)]
+
+def nutricionist_validate_format(nuricionist_crn: str):
+    crn_pattern = r"^CRN-\d{1} \d{5}$"
+    if re.match(crn_pattern, nuricionist_crn):     
+        return True
+    return False
 
 @router.post(
     "/create_User",
@@ -94,20 +101,26 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
         success = True
     )
 
-@router.get("/get_User/{user_id}")
-def get_user(user_id: int, db: DbDependency):
-    """Retrieve a user by their ID."""
-    db_user = db.query(User).filter(User.id == user_id).first()
+@router.get("/login_User/{user_email}/{user_password}")
+def login_user(user_email: str, user_password: str, db: DbDependency):
+    """Login a user by their email and password."""
+    db_user = db.query(User).filter(User.email == user_email).first()
+    db_user_password = db.query(User.password).filter(User.email == user_email).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    if not password_hash.verify(user_password, db_user_password.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     return db_user
 
-@router.get("/get_Nutricionist/{nutricionist_id}")
-def get_nutricionist(nutricionist_id: int, db: DbDependency):
-    """Retrieve a nutricionist by their ID."""
-    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+@router.get("/login_Nutricionist/{nutricionist_email}/{nutricionist_password}")
+def login_nutricionist(nutricionist_email: str, nutricionist_password: str, db: DbDependency):
+    """Login a nutricionist by their email and password."""
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.email == nutricionist_email).first()
+    db_nutricionist_password = db.query(Nutricionist.password).filter(Nutricionist.email == nutricionist_email).first()
     if db_nutricionist is None:
         raise HTTPException(status_code=404, detail="Nutricionist not found")
+    if not password_hash.verify(nutricionist_password, db_nutricionist_password.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     return db_nutricionist
 
 # Endpoint abaixo descontinuado, pois não é necessário para a funcionalidade atual do sistema.
@@ -136,10 +149,14 @@ def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbD
     new_nutricionist = Nutricionist(
         email = nutricionist.email,
         password = nutricionist.password,
-        phone = nutricionist.phone
+        phone = nutricionist.phone,
+        crn = nutricionist.crn
     )
 
-    if new_nutricionist is None:
+    if not nutricionist_validate_format(nutricionist.crn):
+        raise HTTPException(status_code=400, detail="Invalid CRN format. Expected format: CRN-X XXXXX")
+
+    if new_nutricionist is False:
         raise HTTPException(status_code=400, detail="Nutricionist creation failed")
 
     if db.query(Nutricionist).filter(Nutricionist.email == nutricionist.email).first():
