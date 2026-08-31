@@ -148,7 +148,7 @@ def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbD
     """Create a new nutricionist in the database."""
     new_nutricionist = Nutricionist(
         email = nutricionist.email,
-        password = nutricionist.password,
+        password = password_hash.hash(nutricionist.password),
         phone = nutricionist.phone,
         crn = nutricionist.crn
     )
