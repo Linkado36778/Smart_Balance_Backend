@@ -13,12 +13,21 @@ from application.controller import food_search_router
 from application.controller import food_recognition
 from application.models.return_model import ReturnException
 from shared.database import engine, initialize_database
+import json
+
+class UTF8JSONResponse(JSONResponse):
+    """Custom JSONResponse class that ensures UTF-8 encoding for JSON responses."""
+    def render(self, content) -> bytes:
+        """Renders the content as a JSON byte string with UTF-8 encoding."""
+        return json.dumps(content, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")).encode("utf-8")
+
 
 app = FastAPI(
     docs_url=None,  # Disable default Swagger UI
     redoc_url=None,  # Disable default ReDoc UI
     title="Smart Balance API",
     description="API for user management and food search functionalities in the Smart Balance application.",
+    default_response_class=UTF8JSONResponse
 )
 app.include_router(user_management_router.router)
 app.include_router(food_search_router.router)

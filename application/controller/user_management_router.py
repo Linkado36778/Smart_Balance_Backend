@@ -105,10 +105,9 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
 def login_user(user_email: str, user_password: str, db: DbDependency):
     """Login a user by their email and password."""
     db_user = db.query(User).filter(User.email == user_email).first()
-    db_user_password = db.query(User.password).filter(User.email == user_email).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if not password_hash.verify(user_password, db_user_password.password):
+    if not password_hash.verify(user_password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return db_user
 
@@ -116,10 +115,9 @@ def login_user(user_email: str, user_password: str, db: DbDependency):
 def login_nutricionist(nutricionist_email: str, nutricionist_password: str, db: DbDependency):
     """Login a nutricionist by their email and password."""
     db_nutricionist = db.query(Nutricionist).filter(Nutricionist.email == nutricionist_email).first()
-    db_nutricionist_password = db.query(Nutricionist.password).filter(Nutricionist.email == nutricionist_email).first()
     if db_nutricionist is None:
         raise HTTPException(status_code=404, detail="Nutricionist not found")
-    if not password_hash.verify(nutricionist_password, db_nutricionist_password.password):
+    if not password_hash.verify(nutricionist_password, db_nutricionist.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return db_nutricionist
 
@@ -148,7 +146,7 @@ def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbD
     """Create a new nutricionist in the database."""
     new_nutricionist = Nutricionist(
         email = nutricionist.email,
-        password = nutricionist.password,
+        password = password_hash.hash(nutricionist.password),
         phone = nutricionist.phone,
         crn = nutricionist.crn
     )
