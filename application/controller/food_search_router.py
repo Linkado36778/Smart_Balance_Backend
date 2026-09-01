@@ -8,12 +8,21 @@ from unicodedata import normalize
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
+from fastapi.responses import JSONResponse
+import json
 
 from shared.database import get_db
 from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation
 from application.models.return_model import ReturnModel, ReturnException
 
-router = APIRouter(tags=["food search"])
+class UTF8JSONResponse(JSONResponse):
+    """Custom JSONResponse class that ensures UTF-8 encoding for JSON responses."""
+    def render(self, content) -> bytes:
+        """Renders the content as a JSON byte string with UTF-8 encoding."""
+        return json.dumps(content, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")).encode("utf-8")
+
+
+router = APIRouter(tags=["food search"], default_response_class=UTF8JSONResponse)
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")  # Default to localhost if not set
 
