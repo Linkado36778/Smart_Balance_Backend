@@ -10,16 +10,23 @@ param(
 $ErrorActionPreference = "Stop"
 
 $backupDir = Split-Path -Parent $Output
-if ($backupDir) {
-    New-Item -ItemType Directory -Force $backupDir | Out-Null
+if (-not $backupDir) {
+    $backupDir = "."
 }
+
+New-Item -ItemType Directory -Force $backupDir | Out-Null
 
 $password = Read-Host "Postgres password for user '$User'" -AsSecureString
 $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
 )
 
-$tempOutput = "$Output.tmp"
+$outputFile = Split-Path -Leaf $Output
+$tempFile = "$outputFile.tmp"
+$tempOutput = Join-Path $backupDir $tempFile
+$resolvedBackupDir = (Resolve-Path $backupDir).Path
+$backupMount = "${resolvedBackupDir}:/backup"
+
 if (Test-Path $tempOutput) {
     Remove-Item $tempOutput
 }
@@ -27,6 +34,7 @@ if (Test-Path $tempOutput) {
 try {
     docker run --rm `
         -e PGPASSWORD="$plainPassword" `
+        -v $backupMount `
         $ClientImage `
         pg_dump `
         -h $HostName `
@@ -34,7 +42,8 @@ try {
         -U $User `
         -d $Database `
         --clean `
-        --if-exists > $tempOutput
+        --if-exists `
+        --file="/backup/$tempFile"
 
     if ($LASTEXITCODE -ne 0) {
         throw "pg_dump failed."

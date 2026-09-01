@@ -26,7 +26,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - sb-postgres-data:/var/lib/postgresql/data
+      - sb-postgres-18-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -34,4 +34,4 @@ services:
       retries: 5
 
 volumes:
-  sb-postgres-data:
+  sb-postgres-18-data:
