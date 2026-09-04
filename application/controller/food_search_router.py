@@ -6,23 +6,15 @@ from typing import Annotated, Any, Dict, List, Optional, Union
 from unicodedata import normalize
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
-from fastapi.responses import JSONResponse
-import json
 
 from shared.database import get_db
-from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation
+from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, MealFoodAssociation
 from application.models.return_model import ReturnModel, ReturnException
 
-class UTF8JSONResponse(JSONResponse):
-    """Custom JSONResponse class that ensures UTF-8 encoding for JSON responses."""
-    def render(self, content) -> bytes:
-        """Renders the content as a JSON byte string with UTF-8 encoding."""
-        return json.dumps(content, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")).encode("utf-8")
 
-
-router = APIRouter(tags=["food search"], default_response_class=UTF8JSONResponse)
+router = APIRouter(tags=["food search"])
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")  # Default to localhost if not set
 
@@ -60,6 +52,16 @@ class PostCreateMealBodyRequest(BaseModel):
     calories: float = 0.0
     weight_g: float = 0.0
     list_foods_ids: List[int] = Field(default_factory=list)
+
+    @field_validator("consumed_at")
+    def parse_consumed_at(cls, value):
+        """Ensure consumed_at is a datetime object."""
+        if isinstance(value, str):
+            try:
+                return datetime.strptime(value, "%H:%M")
+            except ValueError:
+                raise ValueError("consumed_at must be in H:M format")
+        return value
 
 # region Setup
 
@@ -194,8 +196,23 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
             "name": food.name,
             "category_id": food.category_id,
             "brand_id": food.brand_id,
+            "nutrients": [
+                {
+                    "id": nutrient.id,
+                    "name": nutrient.name,
+                    "amount": assoc.amount,
+                }
+                for nutrient, assoc in (
+                    db.query(Nutrient, FoodNutrientAssociation)
+                    .join(FoodNutrientAssociation, FoodNutrientAssociation.nutrient_id == Nutrient.id)
+                    .filter(FoodNutrientAssociation.food_id == food.id)
+                    .filter((Nutrient.name == "Proteinas") | (Nutrient.name == "Carboidratos") | (Nutrient.name == "Gorduras"))
+                    .all()
+                )
+            ],
             "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
             "user_allergic": food.id in allergic_food_ids,
+            "description": food.description
         }
         for food in foods
     ]
@@ -307,17 +324,28 @@ def list_categories(db: DbDependency):
 # region Nutrients
 
 @router.get("/nutrients")
-def list_nutrients(db: DbDependency):
+def list_all_nutrients(db: DbDependency):
     """Lista todos os nutrientes disponíveis."""
     return db.query(Nutrient).order_by(Nutrient.id).all()
 
+
+@router.get("/nutrients/{food_id}")
+def list_micro_nutrients(food_id: int, db: DbDependency):
+    """Lista todos os nutrientes disponíveis."""
+    return db.query(FoodNutrientAssociation).join(Nutrient).filter(
+        (Nutrient.name != "Proteinas") &
+        (Nutrient.name != "Carboidratos") &
+        (Nutrient.name != "Gorduras")
+    ).filter(
+        FoodNutrientAssociation.food_id == food_id
+    ).all()
 
 # region Meals
 
 @router.get("/meals")
 def list_user_meals(user_id: int, db: DbDependency):
     """Busca uma refeição pelo ID do usuário."""
-    db_meal = db.query(Meal).filter(Meal.user_id == user_id).all()
+    db_meal = db.query(MealFoodAssociation).filter(Meal.user_id == user_id).filter(Food.id == MealFoodAssociation.food_id).all()
     if not db_meal:
         raise HTTPException(status_code=404, detail="Meal not found")
     return db_meal

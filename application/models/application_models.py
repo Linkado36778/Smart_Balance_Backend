@@ -134,6 +134,7 @@ class Food(Base):
         ForeignKey("Brand.id"), index=True, default=None
     )
     image_url: Mapped[Optional[str]] = mapped_column(index=True, default=None)
+    description: Mapped[Optional[str]] = mapped_column(index=True, default=None)
 
 
 class Brand(Base):

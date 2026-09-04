@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
 
 from shared.database import get_db
-from application.models.application_models import User, Nutricionist, UserAllergenAssociation
+from application.models.application_models import Allergen, User, Nutricionist, UserAllergenAssociation
 from application.models.return_model import ReturnModel
 import re
 
@@ -180,3 +180,42 @@ def add_allergen_to_user(allergen_User: PostAllergenUser, db: DbDependency):
     db.commit()
     db.refresh(new_association)
     return new_association
+
+@router.post("/link_user_nutricionist")
+def link_user_nutricionist(user_id: int, nutricionist_id: int, db: DbDependency):
+    """Link a user to a nutricionist."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+
+    db_user.nutricionist_id = nutricionist_id
+    db.commit()
+    db.refresh(db_user)
+    return ReturnModel(
+        message = "User linked to nutricionist successfully",
+        data = {
+            "user_id": db_user.id,
+            "nutricionist_id": db_user.nutricionist_id
+        },
+        success = True
+    )
+
+
+@router.get("/list_allergens_by_user/{user_id}")
+def list_allergens_by_user(user_id: int, db: DbDependency):
+    """List all allergens associated with a user."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    allergens = (
+        db.query(Allergen)
+        .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
+        .filter(UserAllergenAssociation.user_id == user_id)
+        .all()
+    )
+    return allergens
