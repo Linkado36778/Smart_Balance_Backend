@@ -52,6 +52,7 @@ class PostCreateMealBodyRequest(BaseModel):
     calories: float = 0.0
     weight_g: float = 0.0
     list_foods_ids: List[int] = Field(default_factory=list)
+    saved_meal: bool = False
 
     @field_validator("consumed_at")
     def parse_consumed_at(cls, value):
@@ -393,18 +394,24 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
         user_id = meal.user_id,
         consumed_at = meal.consumed_at,
         calories = total_calories,
-        weight_g = meal.weight_g
+        weight_g = meal.weight_g,
+        saved_meal = meal.saved_meal
     )
-    db.add(new_meal)
-    db.flush()
 
-    for food in foods:
-        assoc = MealFoodAssociation(
-            meal_id=new_meal.id,
-            food_id=food.id,
-        )
-        db.add(assoc)
+    if new_meal.weight_g <= 0:
+        raise HTTPException(status_code=400, detail="Invalid meal weight")
 
-    db.commit()
-    db.refresh(new_meal)
-    return new_meal
+    if new_meal.saved_meal == True:
+        db.add(new_meal)
+        db.flush()
+
+        for food in foods:
+            assoc = MealFoodAssociation(
+                meal_id=new_meal.id,
+                food_id=food.id,
+            )
+            db.add(assoc)
+
+        db.commit()
+        db.refresh(new_meal)
+        return new_meal

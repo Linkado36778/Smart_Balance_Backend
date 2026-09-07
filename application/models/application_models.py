@@ -118,6 +118,7 @@ class Meal(Base):
     weight_g: Mapped[float] = mapped_column()
     consumed_at: Mapped[datetime] = mapped_column()
     user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
+    saved_meal: Mapped[bool] = mapped_column(index=True, default=None)
 
 
 class Food(Base):
