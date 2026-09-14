@@ -346,10 +346,36 @@ def list_micro_nutrients(food_id: int, db: DbDependency):
 @router.get("/meals")
 def list_user_meals(user_id: int, db: DbDependency):
     """Busca uma refeição pelo ID do usuário."""
-    db_meal = db.query(MealFoodAssociation).filter(Meal.user_id == user_id).filter(Food.id == MealFoodAssociation.food_id).all()
-    if not db_meal:
+    meals = db.query(Meal).filter(Meal.user_id == user_id).all()
+    if not meals:
         raise HTTPException(status_code=404, detail="Meal not found")
-    return db_meal
+    result = []
+    for meal in meals:
+        foods = (
+            db.query(Food)
+            .join(MealFoodAssociation, MealFoodAssociation.food_id == Food.id)
+            .filter(MealFoodAssociation.meal_id == meal.id)
+            .all()
+        )
+        result.append({
+            "id": meal.id,
+            "name": meal.name,
+            "calories": meal.calories,
+            "weight_g": meal.weight_g,
+            "consumed_at": meal.consumed_at,
+            "user_id": meal.user_id,
+            "foods": [
+                {
+                    "id": food.id,
+                    "name": food.name,
+                    "category_id": food.category_id,
+                    "brand_id": food.brand_id,
+                    "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
+                }
+                for food in foods
+            ],
+        })
+    return result
 
 
 @router.post(
