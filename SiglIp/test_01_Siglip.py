@@ -4,6 +4,9 @@ from PIL import Image
 from io import BytesIO
 import base64
 import binascii
+import os
+import cv2
+import numpy
 
 from application.models.application_models import Food
 from sqlalchemy.orm import Session
@@ -218,6 +221,433 @@ texts = [label["model_label"] for label in LABELS]
 # ----------------------------
 # IMAGE RECOGNITION
 # ----------------------------
+
+# ---------------------------------------------------------------------------
+# Etapa 1 — OpenCV
+# ---------------------------------------------------------------------------
+
+def find_changed_region(
+    prev_path,
+    curr_path,
+    output_dir="output",
+    min_area=800,
+    thresh_value=25,
+    kernel_size=5,
+    morph_iterations=2,
+    padding=10,
+    merge_boxes=False,
+):
+    """
+    Compara a imagem anterior e a imagem atual e encontra a região
+    que sofreu alteração.
+
+    A comparação é feita em escala de cinza.
+
+    IMPORTANTE:
+        A escala de cinza NÃO é enviada ao SigLIP.
+
+        Depois que a região alterada é encontrada, o recorte é feito
+        diretamente sobre a imagem atual colorida.
+
+    Retorna:
+        crop_path
+        bbox = (x, y, width, height)
+    """
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # -----------------------------------------------------------------------
+    # Carrega as imagens
+    # -----------------------------------------------------------------------
+
+    prev_color = cv2.imread(prev_path)
+    curr_color = cv2.imread(curr_path)
+
+    if prev_color is None:
+        raise FileNotFoundError(
+            f"Não foi possível abrir a imagem anterior: {prev_path}"
+        )
+
+    if curr_color is None:
+        raise FileNotFoundError(
+            f"Não foi possível abrir a imagem atual: {curr_path}"
+        )
+
+    print("\n--- Imagens carregadas ---")
+    print(f"Anterior: {prev_path}")
+    print(f"Atual:    {curr_path}")
+
+    # -----------------------------------------------------------------------
+    # Garante que as imagens tenham o mesmo tamanho
+    # -----------------------------------------------------------------------
+
+    if prev_color.shape != curr_color.shape:
+
+        print(
+            "\nAs imagens possuem tamanhos diferentes."
+            "\nRedimensionando a imagem anterior para o tamanho da atual..."
+        )
+
+        prev_color = cv2.resize(
+            prev_color,
+            (curr_color.shape[1], curr_color.shape[0])
+        )
+
+    # -----------------------------------------------------------------------
+    # Escala de cinza
+    #
+    # A escala de cinza é usada APENAS para comparação.
+    # -----------------------------------------------------------------------
+
+    prev_gray = cv2.cvtColor(
+        prev_color,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    curr_gray = cv2.cvtColor(
+        curr_color,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    # -----------------------------------------------------------------------
+    # Suavização
+    #
+    # Reduz pequenas diferenças causadas por ruído da câmera.
+    # -----------------------------------------------------------------------
+
+    prev_gray = cv2.GaussianBlur(
+        prev_gray,
+        (5, 5),
+        0
+    )
+
+    curr_gray = cv2.GaussianBlur(
+        curr_gray,
+        (5, 5),
+        0
+    )
+
+    # -----------------------------------------------------------------------
+    # Diferença absoluta
+    # -----------------------------------------------------------------------
+
+    diff = cv2.absdiff(
+        prev_gray,
+        curr_gray
+    )
+
+    # -----------------------------------------------------------------------
+    # Threshold
+    #
+    # Pixels cuja diferença é maior que thresh_value tornam-se brancos.
+    # -----------------------------------------------------------------------
+
+    _, mask = cv2.threshold(
+        diff,
+        thresh_value,
+        255,
+        cv2.THRESH_BINARY
+    )
+
+    # -----------------------------------------------------------------------
+    # Operações morfológicas
+    #
+    # OPEN:
+    #     Remove pequenos pontos isolados.
+    #
+    # CLOSE:
+    #     Une regiões próximas que pertencem à mesma alteração.
+    # -----------------------------------------------------------------------
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (kernel_size, kernel_size)
+    )
+
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_OPEN,
+        kernel,
+        iterations=morph_iterations
+    )
+
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        kernel,
+        iterations=morph_iterations
+    )
+
+    # -----------------------------------------------------------------------
+    # Encontra os contornos das regiões alteradas
+    # -----------------------------------------------------------------------
+
+    contours, _ = cv2.findContours(
+        mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE
+    )
+
+    if not contours:
+        raise ValueError(
+            "\nNenhuma região de diferença foi encontrada.\n"
+            "Verifique se as imagens realmente representam estados "
+            "diferentes da balança ou reduza --thresh."
+        )
+
+    # -----------------------------------------------------------------------
+    # Filtra contornos muito pequenos
+    # -----------------------------------------------------------------------
+
+    valid_boxes = []
+
+    for contour in contours:
+
+        area = cv2.contourArea(contour)
+
+        if area >= min_area:
+
+            x, y, w, h = cv2.boundingRect(contour)
+
+            valid_boxes.append(
+                (x, y, w, h)
+            )
+
+    if not valid_boxes:
+
+        raise ValueError(
+            f"\nNenhum contorno com área >= {min_area}px foi encontrado.\n"
+            "Tente reduzir --min-area ou examine mask.png."
+        )
+
+    # -----------------------------------------------------------------------
+    # Seleção das bounding boxes
+    # -----------------------------------------------------------------------
+
+    if merge_boxes:
+
+        # Une todas as regiões válidas em uma única bounding box.
+
+        xs = [
+            x
+            for x, y, w, h in valid_boxes
+        ]
+
+        ys = [
+            y
+            for x, y, w, h in valid_boxes
+        ]
+
+        x2s = [
+            x + w
+            for x, y, w, h in valid_boxes
+        ]
+
+        y2s = [
+            y + h
+            for x, y, w, h in valid_boxes
+        ]
+
+        x = min(xs)
+        y = min(ys)
+
+        x2 = max(x2s)
+        y2 = max(y2s)
+
+        w = x2 - x
+        h = y2 - y
+
+    else:
+
+        # Seleciona somente a maior região.
+
+        x, y, w, h = max(
+            valid_boxes,
+            key=lambda box: box[2] * box[3]
+        )
+
+    # -----------------------------------------------------------------------
+    # Padding
+    #
+    # Adiciona uma pequena margem ao redor da região detectada.
+    # -----------------------------------------------------------------------
+
+    img_h, img_w = curr_color.shape[:2]
+
+    x0 = max(
+        0,
+        x - padding
+    )
+
+    y0 = max(
+        0,
+        y - padding
+    )
+
+    x1 = min(
+        img_w,
+        x + w + padding
+    )
+
+    y1 = min(
+        img_h,
+        y + h + padding
+    )
+
+    # -----------------------------------------------------------------------
+    # Recorte
+    #
+    # IMPORTANTE:
+    # O recorte é feito na imagem ATUAL COLORIDA.
+    # -----------------------------------------------------------------------
+
+    crop_color = curr_color[
+        y0:y1,
+        x0:x1
+    ]
+
+    # -----------------------------------------------------------------------
+    # Caminhos dos artefatos
+    # -----------------------------------------------------------------------
+
+    diff_path = os.path.join(
+        output_dir,
+        "diff.png"
+    )
+
+    mask_path = os.path.join(
+        output_dir,
+        "mask.png"
+    )
+
+    mask_overlay_path = os.path.join(
+        output_dir,
+        "mask_overlay.png"
+    )
+
+    crop_path = os.path.join(
+        output_dir,
+        "crop.png"
+    )
+
+    overlay_path = os.path.join(
+        output_dir,
+        "boxes_overlay.png"
+    )
+
+    # -----------------------------------------------------------------------
+    # Salva diferença
+    # -----------------------------------------------------------------------
+
+    cv2.imwrite(
+        diff_path,
+        diff
+    )
+
+    # -----------------------------------------------------------------------
+    # Salva máscara
+    # -----------------------------------------------------------------------
+
+    cv2.imwrite(
+        mask_path,
+        mask
+    )
+
+    # -----------------------------------------------------------------------
+    # Salva somente a região detectada pela máscara
+    #
+    # Isso ajuda a verificar visualmente o que o OpenCV realmente detectou.
+    # -----------------------------------------------------------------------
+
+    mask_overlay = curr_color.copy()
+
+    mask_overlay[
+        mask == 0
+    ] = 0
+
+    cv2.imwrite(
+        mask_overlay_path,
+        mask_overlay
+    )
+
+    # -----------------------------------------------------------------------
+    # Salva recorte colorido
+    # -----------------------------------------------------------------------
+
+    cv2.imwrite(
+        crop_path,
+        crop_color
+    )
+
+    # -----------------------------------------------------------------------
+    # Desenha bounding box sobre a imagem atual
+    # -----------------------------------------------------------------------
+
+    overlay = curr_color.copy()
+
+    cv2.rectangle(
+        overlay,
+        (x0, y0),
+        (x1, y1),
+        (0, 255, 0),
+        2
+    )
+
+    cv2.imwrite(
+        overlay_path,
+        overlay
+    )
+
+    # -----------------------------------------------------------------------
+    # Informações
+    # -----------------------------------------------------------------------
+
+    print("\n--- Detecção de região alterada (OpenCV) ---")
+
+    print(f"Diff salvo em:          {diff_path}")
+    print(f"Máscara salva em:       {mask_path}")
+    print(f"Mask overlay salvo em:  {mask_overlay_path}")
+    print(f"Recorte salvo em:       {crop_path}")
+    print(f"Overlay salvo em:       {overlay_path}")
+
+    print(
+        f"\nBounding box:"
+        f" x={x0},"
+        f" y={y0},"
+        f" w={x1 - x0},"
+        f" h={y1 - y0}"
+    )
+
+    return crop_path, (
+        x0,
+        y0,
+        x1 - x0,
+        y1 - y0
+    )
+
+
+def recognize_changed_foods(prev_path: str, curr_path: str, db: Session):
+    crop_path, bbox = find_changed_region(prev_path, curr_path)
+
+    with open(crop_path, "rb") as crop_file:
+        crop_bytes = crop_file.read()
+
+    recognition = image_recognition_endpoint(crop_bytes, db)
+
+    return {
+        "changed": True,
+        "first_image": False,
+        "items": [
+            {
+                "bbox": bbox,
+                "recognized_food": recognition,
+            }
+        ],
+    }
+
+# ---------------------------------------------------------------------------
+# Etapa 2 - SigLIP
+# ---------------------------------------------------------------------------
 
 def _normalize_image_bytes(image_data: bytes | str) -> bytes:
     if isinstance(image_data, str):

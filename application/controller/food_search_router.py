@@ -202,12 +202,13 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
                     "id": nutrient.id,
                     "name": nutrient.name,
                     "amount": assoc.amount,
+                    "unit": nutrient.unit,
+                    "calories_per_unit": nutrient.calories_per_unit,
                 }
                 for nutrient, assoc in (
                     db.query(Nutrient, FoodNutrientAssociation)
                     .join(FoodNutrientAssociation, FoodNutrientAssociation.nutrient_id == Nutrient.id)
                     .filter(FoodNutrientAssociation.food_id == food.id)
-                    .filter((Nutrient.name == "Proteinas") | (Nutrient.name == "Carboidratos") | (Nutrient.name == "Gorduras"))
                     .all()
                 )
             ],

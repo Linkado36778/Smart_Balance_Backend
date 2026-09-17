@@ -219,3 +219,11 @@ def list_allergens_by_user(user_id: int, db: DbDependency):
         .all()
     )
     return allergens
+
+@router.get("/list_allergens")
+def list_allergens(db: DbDependency):
+    """List all allergens in the database."""
+    allergens_id = db.query(Allergen.id).all()
+    allergens_name = db.query(Allergen.name).all()
+    return {"allergens_id": [allergen.id for allergen in allergens_id], 
+            "allergens_name": [allergen.name for allergen in allergens_name]}
