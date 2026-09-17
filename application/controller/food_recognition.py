@@ -3,6 +3,7 @@ from pathlib import Path
 from application.models.application_models import User
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
+import shutil
 
 from SiglIp.test_01_Siglip import image_recognition_endpoint, recognize_changed_foods
 from shared.database import get_db
@@ -77,3 +78,11 @@ async def recognize_food_from_image(user_id: int, db: DbDependency, file: Upload
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.on_event("shutdown")
+def shutdown_event():
+    for folder in ["tmp", "output"]:
+        path = Path(folder)
+        if path.exists():
+            shutil.rmtree(path)
