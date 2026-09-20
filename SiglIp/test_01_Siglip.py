@@ -6,7 +6,6 @@ import base64
 import binascii
 import os
 import cv2
-import numpy
 
 from application.models.application_models import Food
 from sqlalchemy.orm import Session
