@@ -442,3 +442,62 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
         db.commit()
         db.refresh(new_meal)
         return new_meal
+
+
+@router.patch("/meals/{meal_id}/{user_id}", responses={200: {"model": Meal, "description": "Meal updated successfully"}})
+def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db: DbDependency):
+    """Atualiza uma refeição existente."""
+
+    updated_meal = db.query(Meal).filter(Meal.id == meal_id).filter(Meal.user_id == user_id).first()
+
+    if not updated_meal:
+        raise HTTPException(status_code=404, detail="Meal not found")
+
+    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).all()
+    for assoc in deleted_associations:
+        db.delete(assoc)
+
+    # deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).all()
+    # for assoc in deleted_associations:
+    #     db.delete(assoc)
+
+    for field, value in meal.model_dump().items():
+        setattr(updated_meal, field, value)
+
+    foods: List[Food] = []
+
+    for food_id in meal.list_foods_ids:
+        food = db.query(Food).filter(Food.id == food_id).first()
+    
+        if food is None:
+            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
+            
+        foods.append(food)
+
+    for new_food in foods:
+        association = MealFoodAssociation(
+            meal_id=updated_meal.id,
+            food_id=new_food.id,
+            )
+        db.add(association)
+
+    db.commit()
+    db.refresh(updated_meal)
+    return updated_meal
+
+@router.delete("/meals/{meal_id}/{user_id}", responses={200: {"model": Meal, "description": "Meal deleted successfully"}})
+def delete_meal(meal_id: int, user_id: int, db: DbDependency):
+    """Deleta uma refeição existente."""
+
+    meal_to_delete = db.query(Meal).filter(Meal.id == meal_id).filter(Meal.user_id == user_id).first()
+
+    if not meal_to_delete:
+        raise HTTPException(status_code=404, detail="Meal not found")
+
+    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == meal_to_delete.id).all()
+    for assoc in deleted_associations:
+        db.delete(assoc)
+
+    db.delete(meal_to_delete)
+    db.commit()
+    return {"message": "Meal deleted successfully"}

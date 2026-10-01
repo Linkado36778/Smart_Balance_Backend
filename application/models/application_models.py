@@ -44,6 +44,21 @@ class MealFoodAssociation(Base):
     )
 
 
+class DietFoodAssociation(Base):
+    """Resolution table Many-to-Many Diet, Food."""
+
+    __tablename__ = 'Diet_Food'
+
+    diet_id: Mapped[int] = mapped_column(
+        ForeignKey('Diet.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    food_id: Mapped[int] = mapped_column(
+        ForeignKey('Food.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+
+
 class FoodNutrientAssociation(Base):
     """Resolution table Many-to-Many Food, Nutrient."""
 
@@ -174,3 +189,12 @@ class Allergen(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
     name: Mapped[str] = mapped_column(index=True)
+
+class Diet(Base):
+
+    __tablename__ = "Diet"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column(index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
+    nutricionist_id: Mapped[int] = mapped_column(ForeignKey("Nutricionist.id"), index=True)

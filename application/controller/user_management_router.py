@@ -1,20 +1,27 @@
 """Controller for user management, including user and nutricionist creation and retrieval."""
 
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, field_validator, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
 
 from shared.database import get_db
-from application.models.application_models import Allergen, User, Nutricionist, UserAllergenAssociation
+from application.models.application_models import Allergen, Diet, DietFoodAssociation, Food, User, Nutricionist, UserAllergenAssociation
 from application.models.return_model import ReturnModel
 import re
 
 router = APIRouter(prefix="/users", tags=["users"])
 password_hash = PasswordHash.recommended()
+
+class PostCreateDietBodyRequest(BaseModel):
+    """Base model for diet creation."""
+    name: str
+    user_id: int
+    nutricionist_id: int
+    list_foods_ids: List[int] = Field(default_factory=list)
 
 class PostAllergenUser(BaseModel):
     """Base model for retrieving allergens by user."""
@@ -204,6 +211,56 @@ def link_user_nutricionist(user_id: int, nutricionist_id: int, db: DbDependency)
         success = True
     )
 
+
+@router.post("/create_diet/{nutricionist_id}/{user_id}")
+def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: PostCreateDietBodyRequest):
+    """Create a diet for a user, linked to a nutricionist."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+
+    new_diet = Diet(
+        name=diet.name,
+        user_id=diet.user_id,
+        nutricionist_id=diet.nutricionist_id
+    )
+
+    db.add(new_diet)
+    db.flush()
+
+    foods: List[Food] = []
+    
+    for food_id in diet.list_foods_ids:
+        food = db.query(Food).filter(Food.id == food_id).first()
+        
+        if food is None:
+            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
+                
+        foods.append(food)
+
+    for new_food in foods:
+        association = DietFoodAssociation(
+            diet_id=new_diet.id,
+            food_id=new_food.id
+        )
+        db.add(association)
+
+    db.commit()
+    db.refresh(new_diet)
+    return ReturnModel(
+        message = "Diet created successfully",
+        data = {
+            "diet_id": new_diet.id,
+            "diet_name": new_diet.name,
+            "user_id": new_diet.user_id,
+            "nutricionist_id": new_diet.nutricionist_id
+        },
+        success = True
+    )
 
 @router.get("/list_allergens_by_user/{user_id}")
 def list_allergens_by_user(user_id: int, db: DbDependency):
