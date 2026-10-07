@@ -126,6 +126,43 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
     return 0.0
 
 
+def get_food_nutrients_by_weigh(db: Session, food_id: int, weight: float):
+    """Fetches the nutrients and their amounts for a given food item, adjusted for a specific weight."""
+    food_nutrient = FoodNutrientAssociation.__table__
+
+    # join Nutrient with the association table and return (Nutrient, amount)
+    nutrients_with_amounts = (
+        db.query(
+            Nutrient,
+            food_nutrient.c.amount,
+        )
+        .join(
+            food_nutrient,
+            Nutrient.id == food_nutrient.c.nutrient_id,
+        )
+        .filter(food_nutrient.c.food_id == food_id)
+        .all()
+    )
+
+    # Adjust amounts based on the provided weight
+    adjusted_nutrients = []
+    for nutrient, amount in nutrients_with_amounts:
+        adjusted_amount = (amount * weight) / 100.0  # Assuming the original amount is per 100g
+        adjusted_nutrients.append((nutrient, adjusted_amount))
+
+    return {
+        "nutrients": [
+            {
+                "nutrient_id": nutrient.id,
+                "name": nutrient.name,
+                "amount": adjusted_amount,
+                "unit": nutrient.unit
+            }
+            for nutrient, adjusted_amount in adjusted_nutrients
+        ]
+    }
+
+
 def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
     """Fetches the nutrients and their amounts for a given food item from the association table."""
     food_nutrient = FoodNutrientAssociation.__table__
@@ -456,10 +493,6 @@ def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db:
     deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).all()
     for assoc in deleted_associations:
         db.delete(assoc)
-
-    # deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).all()
-    # for assoc in deleted_associations:
-    #     db.delete(assoc)
 
     for field, value in meal.model_dump().items():
         setattr(updated_meal, field, value)

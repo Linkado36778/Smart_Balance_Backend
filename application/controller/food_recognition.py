@@ -80,6 +80,52 @@ async def recognize_food_from_image(user_id: int, db: DbDependency, file: Upload
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@router.post("/food-recognition/image/weight")
+async def recognize_food_from_image_weight(user_id: int, db: DbDependency, file: UploadFile = File(...), weight: float | None = None):
+
+    db_user = db.query(User).filter(User.id == user_id).first()
+
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    try:
+        contents = await file.read()
+
+        if not contents:
+            raise HTTPException(status_code=400, detail="Empty image file.")
+
+        previous_path = get_previous_image_path(user_id)
+        current_path = save_temp_image(user_id, contents)
+
+        if previous_path:
+            result = recognize_changed_foods(previous_path, current_path, db)
+        else:
+            recognition = image_recognition_endpoint(contents, db, weight=weight)
+
+            result = {
+                "changed": False,
+                "first_image": True,
+                "items": [
+                    {
+                        "bbox": None,
+                        "recognized_food": recognition,
+                    }
+                ],
+            }
+
+        set_previous_image_path(user_id, current_path)
+
+        return result
+    
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+
 @router.on_event("shutdown")
 def shutdown_event():
     for folder in ["tmp", "output"]:

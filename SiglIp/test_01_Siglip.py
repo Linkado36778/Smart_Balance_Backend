@@ -7,7 +7,8 @@ import binascii
 import os
 import cv2
 
-from application.models.application_models import Food
+from application.controller.food_search_router import get_food_nutrients_by_weigh
+from application.models.application_models import Food, Nutrient
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -673,7 +674,7 @@ def _get_model():
     return processor, model
 
 
-def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int = 3):
+def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int = 3, weight: float | None = None):
     image_bytes = _normalize_image_bytes(image_data)
     top_k = min(top_k, len(LABELS))
 
@@ -716,13 +717,17 @@ def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int 
 
     recognized_food = recognize_food_from_database(db, predictions[0]["label"])
 
+    if weight is not None:
+        recognized_food_weight = recognize_food_from_database_weight(db, predictions[0]["label"], weight)
+
     return {
         "model": MODEL_NAME,
         "language": LABEL_LANGUAGE,
-        "recognized_food": recognized_food,
+        "recognized_food": recognized_food_weight if weight is not None else recognized_food,
         "confidence": predictions[0]["confidence"],
         "predictions": predictions
     }
+
 
 def recognize_food_from_database(db: Session, prediction: str):
     db_search = db.query(Food).filter(Food.name == prediction).first()
@@ -735,5 +740,23 @@ def recognize_food_from_database(db: Session, prediction: str):
             "food_id": db_search.id,
             "food_name": db_search.name,
             "category_id": db_search.category_id,
-            "brand_id": db_search.brand_id
+            "brand_id": db_search.brand_id,
         }
+
+
+def recognize_food_from_database_weight(db: Session, prediction: str, weight: float):
+    db_search = db.query(Food).filter(Food.name == prediction).first()
+
+    if db_search is None:
+        raise HTTPException(status_code=404, detail="Food not found")
+
+    nutrient_amounts = get_food_nutrients_by_weigh(db, db_search.id, weight)
+
+    return {
+        "message": "Food found in the database.",
+        "food_id": db_search.id,
+        "food_name": db_search.name,
+        "category_id": db_search.category_id,
+        "brand_id": db_search.brand_id,
+        "nutrients": nutrient_amounts["nutrients"]
+    }
