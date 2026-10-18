@@ -22,6 +22,7 @@ class PostCreateDietBodyRequest(BaseModel):
     user_id: int
     nutricionist_id: int
     list_foods_ids: List[int] = Field(default_factory=list)
+    goal: str
 
 class PostAllergenUser(BaseModel):
     """Base model for retrieving allergens by user."""
@@ -211,7 +212,6 @@ def link_user_nutricionist(user_id: int, nutricionist_id: int, db: DbDependency)
         success = True
     )
 
-
 @router.post("/create_diet/{nutricionist_id}/{user_id}")
 def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: PostCreateDietBodyRequest):
     """Create a diet for a user, linked to a nutricionist."""
@@ -224,9 +224,10 @@ def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: Post
         raise HTTPException(status_code=404, detail="Nutricionist not found")
 
     new_diet = Diet(
-        name=diet.name,
-        user_id=diet.user_id,
-        nutricionist_id=diet.nutricionist_id
+        name = diet.name,
+        user_id = diet.user_id,
+        nutricionist_id = diet.nutricionist_id,
+        goal = diet.goal
     )
 
     db.add(new_diet)

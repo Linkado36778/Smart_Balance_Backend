@@ -198,3 +198,4 @@ class Diet(Base):
     name: Mapped[str] = mapped_column(index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
     nutricionist_id: Mapped[int] = mapped_column(ForeignKey("Nutricionist.id"), index=True)
+    goal: Mapped[str] = mapped_column(index=True)
