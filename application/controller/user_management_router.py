@@ -1,20 +1,43 @@
 """Controller for user management, including user and nutricionist creation and retrieval."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
+from urllib.parse import urlencode
 
 from shared.database import get_db
-from application.models.application_models import Allergen, Diet, DietFoodAssociation, Food, User, Nutricionist, UserAllergenAssociation
+from application.models.application_models import Allergen, Balance, Diet, DietFoodAssociation, Food, MealFoodAssociation, User, Nutricionist, UserAllergenAssociation, Pairing, UserBalanceAssociation
 from application.models.return_model import ReturnModel
 import re
+import secrets
+import hashlib
+import qrcode
+import os
+
+BASE_URL = os.environ.get("BASE_URL") or "http://localhost:8000"
+QR_CODES_DIR = Path(__file__).resolve().parents[2] / "qr_codes"
 
 router = APIRouter(prefix="/users", tags=["users"])
 password_hash = PasswordHash.recommended()
+
+class PostCreateBalanceBodyRequest(BaseModel):
+    """Base model for balance creation."""
+    id: int
+    name: str
+
+class PostCreatePairingBodyRequest(BaseModel):
+    """Base model for pairing creation."""
+    id: int
+    token_hash: str
+    scale_id: int
+    expires_at: datetime
+    used_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.now)
 
 class PostCreateDietBodyRequest(BaseModel):
     """Base model for diet creation."""
@@ -291,5 +314,173 @@ def list_allergens(db: DbDependency):
         for allergen in allergens
     ]
 
-    # return {"allergens_id": [allergen.id for allergen in allergens_id], 
-    #         "allergens_name": [allergen.name for allergen in allergens_name]}
+@router.post("/register_balance")
+def register_balance(balance: PostCreateBalanceBodyRequest, db: DbDependency):
+    """Register a new balance in the database."""
+    new_balance = Balance(
+        name = balance.name
+    )
+
+    if new_balance is None:
+        raise HTTPException(status_code=400, detail="Balance registration failed")
+
+    db.add(new_balance)
+    db.commit()
+    db.refresh(new_balance)
+    return ReturnModel(
+        message = "Balance registered successfully",
+        data = {
+            "id": new_balance.id,
+            "name": new_balance.name
+        },
+        success = True
+    )
+
+# @router.post("/register_pairing")
+# def register_pairing(pairing: PostCreatePairingBodyRequest, db: DbDependency, user_id: int, balance_id: int):
+#     """Register a new pairing in the database."""
+
+#     pairing_token = secrets.token_urlsafe(32)
+#     token_hash = hashlib.sha256(pairing_token.encode()).hexdigest()
+
+#     db_user = db.query(User).filter(User.id == user_id).first()
+#     if db_user is None:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     db_balance = db.query(Balance).filter(Balance.id == balance_id).first()
+#     if db_balance is None:
+#         raise HTTPException(status_code=404, detail="Balance not found")
+
+#     new_pairing = Pairing(
+#         token_hash = token_hash,
+#         scale_id = db_balance.id,
+#         expires_at = pairing.expires_at,
+#         used_at = pairing.used_at
+#     )
+
+#     if new_pairing is None:
+#         raise HTTPException(status_code=400, detail="Pairing registration failed")
+
+#     db.add(new_pairing)
+#     db.commit()
+#     db.refresh(new_pairing)
+#     return ReturnModel(
+#         message = "Pairing registered successfully",
+#         data = {
+#             "id": new_pairing.id,
+#             "token_hash": new_pairing.token_hash,
+#             "scale_id": new_pairing.scale_id,
+#             "expires_at": new_pairing.expires_at,
+#             "used_at": new_pairing.used_at,
+#             "created_at": new_pairing.created_at
+#         },
+#         success = True
+#     )
+
+
+@router.post("/generate_qr_code/{balance_id}/{user_id}")
+def generate_qr_code(balance_id: int, user_id: int,db: DbDependency):
+    """Cria um token temporário e devolve seu QR Code."""
+
+    db_balance = (
+        db.query(Balance)
+        .filter(Balance.id == balance_id)
+        .first()
+    )
+
+    if db_balance is None:
+        raise HTTPException(status_code=404, detail="Balance not found")
+
+    db_user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .first()
+    )
+
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    pairing_token = secrets.token_urlsafe(32)
+
+    token_hash = hashlib.sha256(
+        pairing_token.encode("utf-8")
+    ).hexdigest()
+
+    db_pairing = Pairing(
+        token_hash=token_hash,
+        expires_at=datetime.now() + timedelta(minutes=5),
+        used_at=None,
+    )
+
+    db.add(db_pairing)
+    db.commit()
+    db.refresh(db_pairing)
+
+    query_string = urlencode({"token": pairing_token})
+    balance_query_string = urlencode({"balance_id": balance_id})
+    user_query_string = urlencode({"user_id": user_id})
+    pairing_url = f"{BASE_URL}/users/pair-scale?{user_query_string}&{balance_query_string}&{query_string}"
+
+    qr_image = qrcode.make(pairing_url)
+    QR_CODES_DIR.mkdir(exist_ok=True)
+    qr_file_name = f"pairing_{db_pairing.id}.png"
+    qr_image.save(QR_CODES_DIR / qr_file_name, format="PNG")
+    qr_code_url = f"{BASE_URL}/qr_codes/{qr_file_name}"
+
+    return ReturnModel(
+        message="QR code generated successfully",
+        data={
+            "pairing_url": pairing_url,
+            "pairing_id": db_pairing.id,
+            "expires_at": db_pairing.expires_at,
+            "qr_code_url": qr_code_url,
+        },
+        success=True,
+    )
+
+@router.get("/pair-scale")
+def pair_scale(user_id: int, balance_id: int, token: str, db: DbDependency):
+    """Endpoint to pair a scale using a token from the QR code."""
+
+    token_hash = hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
+
+    db_pairing = (
+        db.query(Pairing)
+        .filter(Pairing.token_hash == token_hash)
+        .first()
+    )
+
+    if db_pairing is None:
+        raise HTTPException(status_code=404, detail="Pairing not found")
+
+    if db_pairing.used_at is not None:
+        raise HTTPException(status_code=400, detail="Token already used")
+
+    if db_pairing.expires_at < datetime.now():
+        raise HTTPException(status_code=400, detail="Token expired")
+
+    associated_balance = (
+        UserBalanceAssociation(
+            user_id=user_id,
+            balance_id=balance_id
+    )
+    )
+
+    db.add(associated_balance)
+
+    db_pairing.used_at = datetime.now()
+    db.commit()
+    db.refresh(db_pairing)
+
+    return ReturnModel(
+        message="Scale paired successfully",
+        data={
+            "pairing_id": db_pairing.id,
+            "user_id": user_id,
+            "balance_id": balance_id,
+            "used_at": db_pairing.used_at,
+        },
+        success=True,
+    )

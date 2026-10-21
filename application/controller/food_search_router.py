@@ -126,7 +126,7 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
     return 0.0
 
 
-def get_food_nutrients_by_weigh(db: Session, food_id: int, weight: float):
+def get_food_nutrients_by_weight(db: Session, food_id: int, weight: float):
     """Fetches the nutrients and their amounts for a given food item, adjusted for a specific weight."""
     food_nutrient = FoodNutrientAssociation.__table__
 

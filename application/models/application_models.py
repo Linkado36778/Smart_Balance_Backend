@@ -14,6 +14,21 @@ class Base(MappedAsDataclass, DeclarativeBase):
     """Base class for SQLAlchemy models, combining dataclass features with declarative mapping."""
 
 
+class UserBalanceAssociation(Base):
+    """Resolution table Many-to-Many User, Balance."""
+
+    __tablename__ = 'User_Balance'
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey('User.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    balance_id: Mapped[int] = mapped_column(
+        ForeignKey('Balance.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+
+
 class UserAllergenAssociation(Base):
     """Resolution table Many-to-Many User, Allergen."""
 
@@ -190,7 +205,9 @@ class Allergen(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
     name: Mapped[str] = mapped_column(index=True)
 
+
 class Diet(Base):
+    """Model representing a diet in the application."""
 
     __tablename__ = "Diet"
 
@@ -199,3 +216,23 @@ class Diet(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
     nutricionist_id: Mapped[int] = mapped_column(ForeignKey("Nutricionist.id"), index=True)
     goal: Mapped[str] = mapped_column(index=True)
+
+
+class Pairing(Base):
+    """Model representing a pairring of tokens in the application."""
+
+    __tablename__ = "Pairing"
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    token_hash: Mapped[str] = mapped_column(index=True)
+    expires_at: Mapped[datetime] = mapped_column(index=True)
+    used_at: Mapped[Optional[datetime]] = mapped_column(index=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(init=False, default=datetime.now)
+
+
+class Balance(Base):
+    """Model representing a balance in the application."""
+
+    __tablename__ = "Balance"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    name: Mapped[str] = mapped_column(index=True)

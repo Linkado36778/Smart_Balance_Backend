@@ -7,7 +7,7 @@ import binascii
 import os
 import cv2
 
-from application.controller.food_search_router import get_food_nutrients_by_weigh
+from application.controller.food_search_router import get_food_nutrients_by_weight
 from application.models.application_models import Food, Nutrient
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -626,13 +626,13 @@ def find_changed_region(
     )
 
 
-def recognize_changed_foods(prev_path: str, curr_path: str, db: Session):
+def recognize_changed_foods(prev_path: str, curr_path: str, db: Session,  weight: float | None = None):
     crop_path, bbox = find_changed_region(prev_path, curr_path)
 
     with open(crop_path, "rb") as crop_file:
         crop_bytes = crop_file.read()
 
-    recognition = image_recognition_endpoint(crop_bytes, db)
+    recognition = image_recognition_endpoint(crop_bytes, db, weight=weight)
 
     return {
         "changed": True,
@@ -750,7 +750,7 @@ def recognize_food_from_database_weight(db: Session, prediction: str, weight: fl
     if db_search is None:
         raise HTTPException(status_code=404, detail="Food not found")
 
-    nutrient_amounts = get_food_nutrients_by_weigh(db, db_search.id, weight)
+    nutrient_amounts = get_food_nutrients_by_weight(db, db_search.id, weight)
 
     return {
         "message": "Food found in the database.",

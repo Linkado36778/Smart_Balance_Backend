@@ -1,6 +1,7 @@
 """Main application entry point for the Smart Balance API."""
 
 from pathlib import Path
+import shutil
 
 from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request
@@ -42,12 +43,27 @@ def startup_event():
 BASE_DIR = Path(__file__).resolve().parent
 
 IMAGES_DIR = BASE_DIR / "images"
+QR_CODES_DIR = BASE_DIR / "qr_codes"
+QR_CODES_DIR.mkdir(exist_ok=True)
 
 app.mount(
     "/images",
     StaticFiles(directory=IMAGES_DIR),
     name="images",
 )
+
+app.mount(
+    "/qr_codes",
+    StaticFiles(directory=QR_CODES_DIR),
+    name="qr_codes",
+)
+
+
+@app.on_event("shutdown")
+def cleanup_qr_codes():
+    """Remove temporary QR Code images after a graceful API shutdown."""
+    if QR_CODES_DIR.exists():
+        shutil.rmtree(QR_CODES_DIR)
 
 @app.exception_handler(ReturnException)
 async def return_exception_handler(request: Request, exc: ReturnException):

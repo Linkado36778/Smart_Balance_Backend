@@ -98,7 +98,7 @@ async def recognize_food_from_image_weight(user_id: int, db: DbDependency, file:
         current_path = save_temp_image(user_id, contents)
 
         if previous_path:
-            result = recognize_changed_foods(previous_path, current_path, db)
+            result = recognize_changed_foods(previous_path, current_path, db, weight=weight)
         else:
             recognition = image_recognition_endpoint(contents, db, weight=weight)
 
