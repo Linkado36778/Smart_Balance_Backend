@@ -1,4 +1,4 @@
-alembic==1.16.4                       
+alembic==1.16.4
 annotated-types==0.7.0
 anyio==4.9.0
 argon2-cffi==25.1.0
@@ -46,6 +46,7 @@ Pygments==2.19.2
 python-dotenv==1.1.1
 python-multipart==0.0.20
 PyYAML==6.0.2
+qrcode==8.2
 regex==2026.7.19
 requests==2.32.4
 rich==14.1.0
