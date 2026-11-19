@@ -45,7 +45,10 @@ class PostCreateDietBodyRequest(BaseModel):
     user_id: int
     nutricionist_id: int
     list_foods_ids: List[int] = Field(default_factory=list)
-    goal: str
+    kcal_goal: Optional[float] = None
+    fat_goal: Optional[float] = None
+    carb_goal: Optional[float] = None
+    protein_goal: Optional[float] = None
 
 class PostAllergenUser(BaseModel):
     """Base model for retrieving allergens by user."""
@@ -87,6 +90,8 @@ def nutricionist_validate_format(nuricionist_crn: str):
     if re.match(crn_pattern, nuricionist_crn):     
         return True
     return False
+
+# region User
 
 @router.post(
     "/create_User",
@@ -132,6 +137,63 @@ def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
         success = True
     )
 
+@router.patch("/update_User/{user_id}")
+def update_user(user_id: int, user: PostCreateUserBodyRequest, db: DbDependency):
+    """Update an existing user's information."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db_user.email = user.email
+    db_user.birthdate = user.birthdate
+    db_user.weight_kg = user.weight_kg
+    db_user.height_m = user.height_m
+    db_user.sex = user.sex
+    db_user.password = password_hash.hash(user.password)
+    db_user.is_active = user.is_active
+    db_user.nutricionist_id = user.nutricionist_id
+
+    db.commit()
+    db.refresh(db_user)
+    return ReturnModel(
+        message="User updated successfully",
+        data={
+            "id": db_user.id,
+            "email": db_user.email,
+            "birthdate": db_user.birthdate,
+            "weight_kg": db_user.weight_kg,
+            "height_m": db_user.height_m,
+            "sex": db_user.sex,
+            "created_at": db_user.created_at,
+            "is_active": db_user.is_active
+        },
+        success=True
+    )
+
+@router.delete("/delete_User/{user_id}")
+def delete_user(user_id: int, db: DbDependency):
+    """Delete a user from the database."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db.delete(db_user)
+    db.commit()
+    return ReturnModel(
+        message="User deleted successfully",
+        data={"id": user_id},
+        success=True
+    )
+
+@router.get("/get_User/{user_id}")
+def get_user(user_id: int, db: DbDependency):
+    """Retrieve a user by their ID."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db_user
+
+
 @router.get("/login_User/{user_email}/{user_password}")
 def login_user(user_email: str, user_password: str, db: DbDependency):
     """Login a user by their email and password."""
@@ -141,16 +203,6 @@ def login_user(user_email: str, user_password: str, db: DbDependency):
     if not password_hash.verify(user_password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return db_user
-
-@router.get("/login_Nutricionist/{nutricionist_email}/{nutricionist_password}")
-def login_nutricionist(nutricionist_email: str, nutricionist_password: str, db: DbDependency):
-    """Login a nutricionist by their email and password."""
-    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.email == nutricionist_email).first()
-    if db_nutricionist is None:
-        raise HTTPException(status_code=404, detail="Nutricionist not found")
-    if not password_hash.verify(nutricionist_password, db_nutricionist.password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return db_nutricionist
 
 # Endpoint abaixo descontinuado, pois não é necessário para a funcionalidade atual do sistema.
 
@@ -171,6 +223,8 @@ def login_nutricionist(nutricionist_email: str, nutricionist_password: str, db: 
 #     .all()
 # )
 #     return allergens
+
+# region Nutricionist
 
 @router.post("/create_Nutricionist")
 def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
@@ -196,21 +250,64 @@ def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbD
     db.refresh(new_nutricionist)
     return new_nutricionist
 
-@router.post("/add_allergen_to_user")
-def add_allergen_to_user(allergen_User: PostAllergenUser, db: DbDependency):
-    """Add an allergen to a user."""
-    new_association = UserAllergenAssociation(
-        user_id=allergen_User.user_id,
-        allergen_id=allergen_User.allergen_id
+@router.get("/get_Nutricionist/{nutricionist_id}")
+def get_nutricionist(nutricionist_id: int, db: DbDependency):
+    """Retrieve a nutricionist by their ID."""
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+    return db_nutricionist
+
+@router.patch("/update_Nutricionist/{nutricionist_id}")
+def update_nutricionist(nutricionist_id: int, nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
+    """Update an existing nutricionist's information."""
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+
+    db_nutricionist.email = nutricionist.email
+    db_nutricionist.password = password_hash.hash(nutricionist.password)
+    db_nutricionist.phone = nutricionist.phone
+    db_nutricionist.crn = nutricionist.crn
+
+    db.commit()
+    db.refresh(db_nutricionist)
+    return ReturnModel(
+        message="Nutricionist updated successfully",
+        data={
+            "id": db_nutricionist.id,
+            "email": db_nutricionist.email,
+            "phone": db_nutricionist.phone,
+            "crn": db_nutricionist.crn
+        },
+        success=True
     )
 
-    if new_association is None:
-        raise HTTPException(status_code=400, detail="Allergen association failed")
+@router.delete("/delete_Nutricionist/{nutricionist_id}")
+def delete_nutricionist(nutricionist_id: int, db: DbDependency):
+    """Delete a nutricionist from the database."""
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
 
-    db.add(new_association)
+    db.delete(db_nutricionist)
     db.commit()
-    db.refresh(new_association)
-    return new_association
+    return ReturnModel(
+        message="Nutricionist deleted successfully",
+        data={"id": nutricionist_id},
+        success=True
+    )
+
+
+@router.get("/login_Nutricionist/{nutricionist_email}/{nutricionist_password}")
+def login_nutricionist(nutricionist_email: str, nutricionist_password: str, db: DbDependency):
+    """Login a nutricionist by their email and password."""
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.email == nutricionist_email).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+    if not password_hash.verify(nutricionist_password, db_nutricionist.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return db_nutricionist
 
 @router.post("/link_user_nutricionist")
 def link_user_nutricionist(user_id: int, nutricionist_id: int, db: DbDependency):
@@ -235,6 +332,130 @@ def link_user_nutricionist(user_id: int, nutricionist_id: int, db: DbDependency)
         success = True
     )
 
+@router.patch("/unlink_user_nutricionist/{user_id}")
+def unlink_user_nutricionist(user_id: int, db: DbDependency):
+    """Unlink a user from their nutricionist."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    db_user.nutricionist_id = None
+    db.commit()
+    db.refresh(db_user)
+    return ReturnModel(
+        message = "User unlinked from nutricionist successfully",
+        data = {
+            "user_id": db_user.id,
+            "nutricionist_id": db_user.nutricionist_id
+        },
+        success = True
+    )
+
+@router.get("/list_user_data_by_nutricionist/{nutricionist_id}")
+def list_user_data_by_nutricionist(nutricionist_id: int, db: DbDependency):
+    """List all user data associated with a nutricionist."""
+    users = (
+        db.query(User)
+        .filter(User.nutricionist_id == nutricionist_id)
+        .all()
+    )
+    return users
+
+# region Allergen
+
+@router.post("/add_allergen_to_user")
+def add_allergen_to_user(allergen_User: PostAllergenUser, db: DbDependency):
+    """Add an allergen to a user."""
+    new_association = UserAllergenAssociation(
+        user_id=allergen_User.user_id,
+        allergen_id=allergen_User.allergen_id
+    )
+
+    if new_association is None:
+        raise HTTPException(status_code=400, detail="Allergen association failed")
+
+    db.add(new_association)
+    db.commit()
+    db.refresh(new_association)
+    return new_association
+
+@router.get("/list_allergens_by_user/{user_id}")
+def list_allergens_by_user(user_id: int, db: DbDependency):
+    """List all allergens associated with a user."""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    allergens = (
+        db.query(Allergen)
+        .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
+        .filter(UserAllergenAssociation.user_id == user_id)
+        .all()
+    )
+    return allergens
+
+@router.delete("/remove_allergen_from_user")
+def remove_allergen_from_user(user_id: int, allergen_id: int, db: DbDependency):
+    """Remove an allergen from a user."""
+    association = (
+        db.query(UserAllergenAssociation)
+        .filter(UserAllergenAssociation.user_id == user_id)
+        .filter(UserAllergenAssociation.allergen_id == allergen_id)
+        .first()
+    )
+
+    if association is None:
+        raise HTTPException(status_code=404, detail="Allergen association not found")
+
+    db.delete(association)
+    db.commit()
+    return ReturnModel(
+        message="Allergen removed from user successfully",
+        data={
+            "user_id": user_id,
+            "allergen_id": allergen_id
+        },
+        success=True
+    )
+
+@router.post("/add_allergen")
+def add_allergen(allergen: Allergen, db: DbDependency):
+    """Add a new allergen to the database."""
+    new_allergen = Allergen(
+        name=allergen.name
+    )
+
+    if new_allergen is None:
+        raise HTTPException(status_code=400, detail="Allergen creation failed")
+
+    db.add(new_allergen)
+    db.commit()
+    db.refresh(new_allergen)
+    return ReturnModel(
+        message="Allergen added successfully",
+        data={
+            "id": new_allergen.id,
+            "name": new_allergen.name
+        },
+        success=True
+    )
+
+@router.get("/list_allergens")
+def list_allergens(db: DbDependency):
+    """List all allergens in the database."""
+    allergens = db.query(Allergen).all()
+
+    return [
+        {
+            "allergens_id": allergen.id,
+            "allergens_name": allergen.name
+        }
+        for allergen in allergens
+    ]
+
+
+# region Diet
+
 @router.post("/create_diet/{nutricionist_id}/{user_id}")
 def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: PostCreateDietBodyRequest):
     """Create a diet for a user, linked to a nutricionist."""
@@ -250,7 +471,10 @@ def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: Post
         name = diet.name,
         user_id = diet.user_id,
         nutricionist_id = diet.nutricionist_id,
-        goal = diet.goal
+        kcal_goal = diet.kcal_goal,
+        fat_goal = diet.fat_goal,
+        carb_goal = diet.carb_goal,
+        protein_goal = diet.protein_goal
     )
 
     db.add(new_diet)
@@ -286,33 +510,61 @@ def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: Post
         success = True
     )
 
-@router.get("/list_allergens_by_user/{user_id}")
-def list_allergens_by_user(user_id: int, db: DbDependency):
-    """List all allergens associated with a user."""
+@router.get("/list_diets_by_user/{user_id}")
+def list_diets_by_user(user_id: int, db: DbDependency):
+    """List all diets associated with a user."""
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    allergens = (
-        db.query(Allergen)
-        .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
-        .filter(UserAllergenAssociation.user_id == user_id)
+    diets = (
+        db.query(Diet)
+        .filter(Diet.user_id == user_id)
         .all()
     )
-    return allergens
+    return diets
 
-@router.get("/list_allergens")
-def list_allergens(db: DbDependency):
-    """List all allergens in the database."""
-    allergens = db.query(Allergen).all()
+@router.patch("/update_diet/{diet_id}")
+def update_diet(diet_id: int, diet: PostCreateDietBodyRequest, db: DbDependency):
+    """Update an existing diet's information."""
+    db_diet = db.query(Diet).filter(Diet.id == diet_id).first()
+    if db_diet is None:
+        raise HTTPException(status_code=404, detail="Diet not found")
 
-    return [
-        {
-            "allergens_id": allergen.id,
-            "allergens_name": allergen.name
-        }
-        for allergen in allergens
-    ]
+    db_diet.name = diet.name
+    db_diet.kcal_goal = diet.kcal_goal
+    db_diet.fat_goal = diet.fat_goal
+    db_diet.carb_goal = diet.carb_goal
+    db_diet.protein_goal = diet.protein_goal
+
+    # Remove existing food associations
+    db.query(DietFoodAssociation).filter(DietFoodAssociation.diet_id == diet_id).delete()
+
+    # Add new food associations
+    for food_id in diet.list_foods_ids:
+        food = db.query(Food).filter(Food.id == food_id).first()
+        if food is None:
+            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} does not exist")
+        association = DietFoodAssociation(
+            diet_id=db_diet.id,
+            food_id=food.id
+        )
+        db.add(association)
+
+    db.commit()
+    db.refresh(db_diet)
+    return ReturnModel(
+        message="Diet updated successfully",
+        data={
+            "diet_id": db_diet.id,
+            "diet_name": db_diet.name,
+            "user_id": db_diet.user_id,
+            "nutricionist_id": db_diet.nutricionist_id
+        },
+        success=True
+    )
+
+# region Balance and Pairing
 
 @router.post("/register_balance")
 def register_balance(balance: PostCreateBalanceBodyRequest, db: DbDependency):
@@ -335,6 +587,8 @@ def register_balance(balance: PostCreateBalanceBodyRequest, db: DbDependency):
         },
         success = True
     )
+
+
 
 # @router.post("/register_pairing")
 # def register_pairing(pairing: PostCreatePairingBodyRequest, db: DbDependency, user_id: int, balance_id: int):
@@ -378,27 +632,9 @@ def register_balance(balance: PostCreateBalanceBodyRequest, db: DbDependency):
 #     )
 
 
-@router.post("/generate_qr_code/{balance_id}/{user_id}")
-def generate_qr_code(balance_id: int, user_id: int,db: DbDependency):
+@router.post("/generate_qr_code/")
+def generate_qr_code(db: DbDependency):
     """Cria um token temporário e devolve seu QR Code."""
-
-    db_balance = (
-        db.query(Balance)
-        .filter(Balance.id == balance_id)
-        .first()
-    )
-
-    if db_balance is None:
-        raise HTTPException(status_code=404, detail="Balance not found")
-
-    db_user = (
-        db.query(User)
-        .filter(User.id == user_id)
-        .first()
-    )
-
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
 
     pairing_token = secrets.token_urlsafe(32)
 
@@ -417,9 +653,7 @@ def generate_qr_code(balance_id: int, user_id: int,db: DbDependency):
     db.refresh(db_pairing)
 
     query_string = urlencode({"token": pairing_token})
-    balance_query_string = urlencode({"balance_id": balance_id})
-    user_query_string = urlencode({"user_id": user_id})
-    pairing_url = f"{BASE_URL}/users/pair-scale?{user_query_string}&{balance_query_string}&{query_string}"
+    pairing_url = f"{BASE_URL}/users/pair-scale?&{query_string}"
 
     qr_image = qrcode.make(pairing_url)
     QR_CODES_DIR.mkdir(exist_ok=True)
@@ -438,7 +672,7 @@ def generate_qr_code(balance_id: int, user_id: int,db: DbDependency):
         success=True,
     )
 
-@router.get("/pair-scale")
+@router.post("/pair-scale")
 def pair_scale(user_id: int, balance_id: int, token: str, db: DbDependency):
     """Endpoint to pair a scale using a token from the QR code."""
 

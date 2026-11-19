@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
-from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, MealFoodAssociation
+from application.models.application_models import CreatedFood, Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, MealFoodAssociation, CreatedFoodNutrientAssociation, CreatedFoodAllergenAssociation
 from application.models.return_model import ReturnModel, ReturnException
 
 
@@ -25,7 +25,8 @@ class NutrientAmount(BaseModel):
     id: int
     amount: float
 
-class PostCreateFoodBodyRequest(BaseModel):
+
+class PostCreatedFoodBodyRequest(BaseModel):
     """Base model for food creation."""
 
     model_config = ConfigDict(extra="forbid")
@@ -218,10 +219,10 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
     allergic_food_ids = {
         food_id
         for (food_id,) in (
-            db.query(AllergenFoodAssociation.food_id)
+            db.query(CreatedFoodAllergenAssociation.created_food_id)
             .join(
                 UserAllergenAssociation,
-                UserAllergenAssociation.allergen_id == AllergenFoodAssociation.allergen_id,
+                UserAllergenAssociation.allergen_id == CreatedFoodAllergenAssociation.allergen_id,
             )
             .filter(UserAllergenAssociation.user_id == user_id)
             .all()
@@ -257,18 +258,70 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
     ]
 
 
+@router.get("/foods/{food_id}")
+def list_created_foods(db: DbDependency, user_id: int):
+    """Lista alimentos criados pelo usuário e informa se o usuario e alergico a cada um."""
+
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    created_food = db.query(CreatedFood).filter(CreatedFood.user_id == user_id).first()
+    if created_food is None:
+        raise HTTPException(status_code=404, detail="Created food not found")
+
+    allergic_food_ids = {
+        food_id
+        for (food_id,) in (
+            db.query(CreatedFoodAllergenAssociation.created_food_id)
+            .join(
+                UserAllergenAssociation,
+                UserAllergenAssociation.allergen_id == CreatedFoodAllergenAssociation.allergen_id,
+            )
+            .filter(UserAllergenAssociation.user_id == user_id)
+            .all()
+        )
+    }
+
+    return {
+        "id": created_food.id,
+        "name": created_food.name,
+        "category_id": created_food.category_id,
+        "brand_id": created_food.brand_id,
+        "nutrients": [
+            {
+                "id": nutrient.id,
+                "name": nutrient.name,
+                "amount": assoc.amount,
+                "unit": nutrient.unit,
+                "calories_per_unit": nutrient.calories_per_unit,
+            }
+            for nutrient, assoc in (
+                db.query(Nutrient, CreatedFoodNutrientAssociation)
+                .join(CreatedFoodNutrientAssociation, CreatedFoodNutrientAssociation.nutrient_id == Nutrient.id)
+                .filter(CreatedFoodNutrientAssociation.created_food_id == created_food.id)
+                .all()
+            )
+        ],
+        "image": f"{BASE_URL}/images/alimentos/{created_food.image_url}" if created_food.image_url else None,
+        "user_allergic": created_food.id in allergic_food_ids,
+        "description": created_food.description
+    }
+
+
 @router.post("/foods")
-def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
+def create_food(food: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
     """Cadastra um novo alimento com seus nutrientes."""
     try:
-        existing = db.query(Food).filter(Food.name.ilike(f"{food.name}")).first()
+        existing = db.query(CreatedFood).filter(CreatedFood.name.ilike(f"{food.name}")).first()
 
         if existing is not None:
             raise HTTPException(status_code=400, detail="Food already exists")
 
         # Create food with only column fields
-        new_food = Food(
+        new_food = CreatedFood(
             name=food.name,
+            user_id=user_id,
             category_id=food.category_id,
             brand_id=food.brand_id,
         )
@@ -285,9 +338,9 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
                     detail=f"Allergen with id '{allergen_id}' not found",
                 )
 
-            assoc = AllergenFoodAssociation(
+            assoc = CreatedFoodAllergenAssociation(
                 allergen_id=allergen.id,
-                food_id=new_food.id,
+                created_food_id=new_food.id,
             )
             db.add(assoc)
 
@@ -301,8 +354,8 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
                     detail=f"Nutrient '{nutrient_item.id}' not found",
                 )
 
-            assoc = FoodNutrientAssociation(
-                food_id=new_food.id,
+            assoc = CreatedFoodNutrientAssociation(
+                created_food_id=new_food.id,
                 nutrient_id=nutrient.id,
                 amount=nutrient_item.amount,
             )
@@ -324,6 +377,120 @@ def create_food(food: PostCreateFoodBodyRequest, db: DbDependency):
             success=False,
         ) from err
 
+
+@router.patch("/foods/{food_id}")
+def update_food(food_id: int, food: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
+    """Atualiza um alimento existente com seus nutrientes."""
+    try:
+        existing_food = db.query(CreatedFood).filter(CreatedFood.id == food_id).first()
+
+        if existing_food is None:
+            raise HTTPException(status_code=404, detail="Food not found")
+
+        if existing_food.user_id != user_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to update this food")
+
+        # Update food fields
+        existing_food.name = food.name
+        existing_food.category_id = food.category_id
+        existing_food.brand_id = food.brand_id
+
+        # Clear existing associations
+        db.query(CreatedFoodNutrientAssociation).filter(
+            CreatedFoodNutrientAssociation.created_food_id == food_id
+        ).delete()
+
+        db.query(CreatedFoodAllergenAssociation).filter(
+            CreatedFoodAllergenAssociation.created_food_id == food_id
+        ).delete()
+
+        # Create new associations for allergens
+        for allergen_id in food.allergen_ids:
+            allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
+
+            if allergen is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Allergen with id '{allergen_id}' not found",
+                )
+
+            assoc = CreatedFoodAllergenAssociation(
+                allergen_id=allergen.id,
+                created_food_id=existing_food.id,
+            )
+            db.add(assoc)
+
+        # Create new associations for nutrients
+        for nutrient_item in food.nutrients:
+            nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
+
+            if nutrient is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Nutrient '{nutrient_item.id}' not found",
+                )
+
+            assoc = CreatedFoodNutrientAssociation(
+                created_food_id=existing_food.id,
+                nutrient_id=nutrient.id,
+                amount=nutrient_item.amount,
+            )
+            db.add(assoc)
+
+        db.commit()
+        db.refresh(existing_food)
+
+        return ReturnModel(
+            message="Food updated successfully",
+            data=existing_food,
+            success=True
+        )
+
+    except Exception as err:
+        db.rollback()
+        raise ReturnException(
+            message=str(err),
+            success=False,
+        ) from err
+
+
+@router.delete("/foods/{food_id}")
+def delete_food(food_id: int, db: DbDependency, user_id: int):
+    """Deleta um alimento existente."""
+    try:
+        existing_food = db.query(CreatedFood).filter(CreatedFood.id == food_id).first()
+
+        if existing_food is None:
+            raise HTTPException(status_code=404, detail="Food not found")
+
+        if existing_food.user_id != user_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to delete this food")
+
+        # Delete associations first
+        db.query(CreatedFoodNutrientAssociation).filter(
+            CreatedFoodNutrientAssociation.created_food_id == food_id
+        ).delete()
+
+        db.query(CreatedFoodAllergenAssociation).filter(
+            CreatedFoodAllergenAssociation.created_food_id == food_id
+        ).delete()
+
+        # Delete the food itself
+        db.delete(existing_food)
+        db.commit()
+
+        return ReturnModel(
+            message="Food deleted successfully",
+            success=True
+        )
+
+    except Exception as err:
+        db.rollback()
+        raise ReturnException(
+            message=str(err),
+            success=False,
+        ) from err
+
 # region Brands
 
 @router.get("/brands")
@@ -334,6 +501,28 @@ def search_brands(brand_name: str, db: DbDependency):
         raise HTTPException(status_code=404, detail="Brand not found")
     return brands
 
+@router.patch("/brands/{brand_id}")
+def update_brand(brand_id: int, brand: PostCreateBrandBodyRequest, db: DbDependency):
+    """Atualiza uma marca existente."""
+    existing_brand = db.query(Brand).filter(Brand.id == brand_id).first()
+    if existing_brand is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    existing_brand.name = brand.name
+    db.commit()
+    db.refresh(existing_brand)
+    return existing_brand
+
+@router.delete("/brands/{brand_id}")
+def delete_brand(brand_id: int, db: DbDependency):
+    """Deleta uma marca existente."""
+    existing_brand = db.query(Brand).filter(Brand.id == brand_id).first()
+    if existing_brand is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    db.delete(existing_brand)
+    db.commit()
+    return {"message": "Brand deleted successfully"}
 
 @router.post("/brands")
 def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):

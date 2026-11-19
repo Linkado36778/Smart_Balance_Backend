@@ -14,6 +14,37 @@ class Base(MappedAsDataclass, DeclarativeBase):
     """Base class for SQLAlchemy models, combining dataclass features with declarative mapping."""
 
 
+class CreatedFoodAllergenAssociation(Base):
+    """Resolution table Many-to-Many CreatedFood, Allergen."""
+
+    __tablename__ = 'CreatedFood_Allergen'
+
+    created_food_id: Mapped[int] = mapped_column(
+        ForeignKey('CreatedFood.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    allergen_id: Mapped[int] = mapped_column(
+        ForeignKey('Allergen.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+
+
+class CreatedFoodNutrientAssociation(Base):
+    """Resolution table Many-to-Many CreatedFood, Nutrient."""
+
+    __tablename__ = 'CreatedFood_Nutrient'
+
+    created_food_id: Mapped[int] = mapped_column(
+        ForeignKey('CreatedFood.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    nutrient_id: Mapped[int] = mapped_column(
+        ForeignKey('Nutrient.id', ondelete="CASCADE"),
+        primary_key=True
+    )
+    amount: Mapped[float] = mapped_column()
+
+
 class UserBalanceAssociation(Base):
     """Resolution table Many-to-Many User, Balance."""
 
@@ -151,6 +182,24 @@ class Meal(Base):
     saved_meal: Mapped[bool] = mapped_column(index=True, default=None)
 
 
+class CreatedFood(Base):
+    """Model representing a food item created by a user in the application."""
+
+    __tablename__ = "CreatedFood"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
+    name: Mapped[str] = mapped_column(index=True)
+    category_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("Category.id"), index=True, default=None
+    )
+    brand_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("Brand.id"), index=True, default=None
+    )
+    image_url: Mapped[Optional[str]] = mapped_column(index=True, default=None)
+    description: Mapped[Optional[str]] = mapped_column(index=True, default=None)
+    
+
 class Food(Base):
     """Model representing a food item in the application."""
 
@@ -215,11 +264,14 @@ class Diet(Base):
     name: Mapped[str] = mapped_column(index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("User.id"), index=True)
     nutricionist_id: Mapped[int] = mapped_column(ForeignKey("Nutricionist.id"), index=True)
-    goal: Mapped[str] = mapped_column(index=True)
+    kcal_goal: Mapped[Optional[float]] = mapped_column(index=True, default=None)
+    fat_goal: Mapped[Optional[float]] = mapped_column(index=True, default=None)
+    carb_goal: Mapped[Optional[float]] = mapped_column(index=True, default=None)
+    protein_goal: Mapped[Optional[float]] = mapped_column(index=True, default=None)
 
 
 class Pairing(Base):
-    """Model representing a pairring of tokens in the application."""
+    """Model representing a pairing of tokens in the application."""
 
     __tablename__ = "Pairing"
     id: Mapped[int] = mapped_column(primary_key=True, index=True, init=False)
