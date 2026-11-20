@@ -1,29 +1,36 @@
 """Controller for user management, including user and nutricionist creation and retrieval."""
 
+import os
+import re
+import secrets
+import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, List, Optional
+from urllib.parse import urlencode
+
+import qrcode
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
-from urllib.parse import urlencode
 
 from shared.database import get_db
-from application.models.application_models import Allergen, Balance, Diet, DietFoodAssociation, Food, MealFoodAssociation, User, Nutricionist, UserAllergenAssociation, Pairing, UserBalanceAssociation
-from application.models.return_model import ReturnModel
-import re
-import secrets
-import hashlib
-import qrcode
-import os
+from application.models.application_models import Allergen, Balance, Diet, DietFoodAssociation, Food, User, Nutricionist, UserAllergenAssociation, Pairing, UserBalanceAssociation
+from application.models.return_models import ReturnModel, ReturnSuccessUserModel
 
 BASE_URL = os.environ.get("BASE_URL") or "http://localhost:8000"
 QR_CODES_DIR = Path(__file__).resolve().parents[2] / "qr_codes"
 
-router = APIRouter(prefix="/users", tags=["users"])
+#region Setup
+
+router = APIRouter(tags=["User"])
+DbDependency = Annotated[Session, Depends(get_db)]
 password_hash = PasswordHash.recommended()
+EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+#region Schemas
 
 class PostCreateBalanceBodyRequest(BaseModel):
     """Base model for balance creation."""
@@ -83,7 +90,7 @@ class PostCreateNutricionistBodyRequest(BaseModel):
     phone: str
     crn: str
 
-DbDependency = Annotated[Session, Depends(get_db)]
+#region Helpers
 
 def nutricionist_validate_format(nuricionist_crn: str):
     crn_pattern = r"^CRN-\d{1} \d{5}$"
@@ -91,37 +98,41 @@ def nutricionist_validate_format(nuricionist_crn: str):
         return True
     return False
 
-# region User
+#region User
 
 @router.post(
-    "/create_User",
-    responses={
-        200: {"model": PostCreateUserBodyRequest, "description": "User created successfully"},
+    "/user",
+    responses = {
+        200: {"model": ReturnModel, "description": "User created successfully"},
     }
 )
-def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
+def create_user(body: PostCreateUserBodyRequest, db: DbDependency):
     """Create a new user in the database."""
 
+    if not re.fullmatch(EMAIL_REGEX, body.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
+
     new_user = User(
-        email = user.email,
-        birthdate = user.birthdate,
-        weight_kg = user.weight_kg,
-        height_m = user.height_m,
-        sex = user.sex,
-        password = password_hash.hash(user.password),
-        is_active = user.is_active,
-        nutricionist_id = user.nutricionist_id,
+        email = body.email,
+        birthdate = body.birthdate,
+        weight_kg = body.weight_kg,
+        height_m = body.height_m,
+        sex = body.sex,
+        password = password_hash.hash(body.password),
+        is_active = body.is_active,
+        nutricionist_id = body.nutricionist_id,
     )
 
     if new_user is None:
         raise HTTPException(status_code=400, detail="User creation failed")
 
-    if db.query(User).filter(User.email == user.email).first():
+    if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
     return ReturnModel(
         message = "User created successfully",
         data = {
@@ -185,14 +196,32 @@ def delete_user(user_id: int, db: DbDependency):
         success=True
     )
 
-@router.get("/get_User/{user_id}")
-def get_user(user_id: int, db: DbDependency):
+@router.get(
+    "/user/{user_id}",
+    responses = {
+        200: {"model": ReturnModel[ReturnSuccessUserModel], "description": "User getted successfully"},
+    }
+)
+def get_user(route_user_id: int, db: DbDependency):
     """Retrieve a user by their ID."""
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return db_user
+    user = db.query(User).filter(User.id == route_user_id).first()
 
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return ReturnModel(
+        message = "User getted successfully",
+        data = ReturnSuccessUserModel(
+            id = user.id,
+            email = user.email,
+            birthdate = user.birthdate,
+            weight_kg = user.weight_kg,
+            height_m = user.height_m,
+            sex = user.sex,
+            created_at = user.created_at
+        ),
+        success = True
+    )
 
 @router.get("/login_User/{user_email}/{user_password}")
 def login_user(user_email: str, user_password: str, db: DbDependency):
@@ -224,31 +253,45 @@ def login_user(user_email: str, user_password: str, db: DbDependency):
 # )
 #     return allergens
 
-# region Nutricionist
+#region Nutricionist
 
-@router.post("/create_Nutricionist")
-def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
+@router.post(
+    "/nutricionist",
+    responses = {
+        200: {"model": ReturnModel, "description": "Nutricionist created successfully"},
+    }
+)
+def create_nutricionist(body: PostCreateNutricionistBodyRequest, db: DbDependency):
     """Create a new nutricionist in the database."""
+
+    if not re.fullmatch(EMAIL_REGEX, body.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
+
     new_nutricionist = Nutricionist(
-        email = nutricionist.email,
-        password = password_hash.hash(nutricionist.password),
-        phone = nutricionist.phone,
-        crn = nutricionist.crn
+        email = body.email,
+        password = password_hash.hash(body.password),
+        phone = body.phone,
+        crn = body.crn
     )
 
-    if not nutricionist_validate_format(nutricionist.crn):
+    if not nutricionist_validate_format(body.crn):
         raise HTTPException(status_code=400, detail="Invalid CRN format. Expected format: CRN-X XXXXX")
 
     if new_nutricionist is False:
         raise HTTPException(status_code=400, detail="Nutricionist creation failed")
 
-    if db.query(Nutricionist).filter(Nutricionist.email == nutricionist.email).first():
+    if db.query(Nutricionist).filter(Nutricionist.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     db.add(new_nutricionist)
     db.commit()
     db.refresh(new_nutricionist)
-    return new_nutricionist
+
+    return ReturnModel(
+        message = "Nutricionist created successfully",
+        data = None,
+        success = True
+    )
 
 @router.get("/get_Nutricionist/{nutricionist_id}")
 def get_nutricionist(nutricionist_id: int, db: DbDependency):
@@ -653,7 +696,7 @@ def generate_qr_code(db: DbDependency):
     db.refresh(db_pairing)
 
     query_string = urlencode({"token": pairing_token})
-    pairing_url = f"{BASE_URL}/users/pair-scale?&{query_string}"
+    pairing_url = f"{BASE_URL}/pair-scale?{query_string}"
 
     qr_image = qrcode.make(pairing_url)
     QR_CODES_DIR.mkdir(exist_ok=True)

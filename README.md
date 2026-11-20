@@ -24,12 +24,130 @@ Esta API foi criada com FastAPI e PostgreSQL para gerenciar funcionalidades rela
 |-- images/
 |-- scripts/
 |-- shared/
+|-- SiglIp/
 |-- compose.yml
+|-- compose.dev.yml
 |-- Dockerfile
 |-- main.py
+|-- run_local.sh
 |-- requirements.txt
+|-- smart-balance.sql
 `-- .env.example
 ```
+
+## Database Diagram
+
+[dbdiagram.io](https://dbdiagram.io/d/TCC-69d6f447808962968450ace7)
+
+![Database Diagram Imagem](./docs/TCC.png)
+
+<details>
+<summary>Diagram dbdiagram lang</summary>
+
+```SQL
+Table Nutricionist {
+  id          int       [pk, increment]
+  password    varchar   [not null]
+  email       varchar   [not null]
+  phone       varchar   [not null]
+  created_at  datetime  [not null]
+}
+
+Table User {
+  id               int       [pk, increment]
+  password         varchar   [not null]
+  email            varchar   [not null]
+  birthdate        datetime  [not null]
+  weight_kg        float     [not null]
+  height_m         float     [not null]
+  sex              varchar   [not null]
+  created_at       datetime  [not null]
+  is_active        boolean   [not null]
+  nutricionist_id  int       [ref: > Nutricionist.id, null]
+}
+
+Table Meal {
+  id                int       [pk, increment]
+  name              varchar   [not null]
+  calories          float     [not null]
+  weight_g          float     [not null]
+  consumed_at_date  datetime  [not null]
+  consumed_at_time  datetime  [not null]
+  user_id           int       [not null, ref: > User.id]
+}
+
+Table Food {
+  id           int     [pk, increment]
+  name         varchar [not null]
+  category_id  int     [ref: > Category.id, null]
+  brand_id     int     [ref: > Brand.id, null]
+}
+
+Table Brand {
+  id    int     [pk, increment]
+  name  varchar [not null]
+}
+
+Table Category {
+  id    int     [pk, increment]
+  name  varchar [not null]
+}
+
+Table Nutrient {
+  id                int     [pk, increment]
+  name              varchar [not null]
+  unit              varchar [not null]
+  calories_per_unit float   [null, default: 0.0]
+}
+
+Table Allergen {
+  id    int     [pk, increment]
+  name  varchar [not null]
+}
+
+// Many-to-Many: User <-> Allergen
+Table User_Allergen {
+  user_id     int [not null, ref: > User.id]
+  allergen_id int [not null, ref: > Allergen.id]
+
+  indexes {
+    (user_id, allergen_id) [pk]
+  }
+}
+
+// Many-to-Many: Meal <-> Food
+Table Meal_Food {
+  meal_id int [not null, ref: > Meal.id]
+  food_id int [not null, ref: > Food.id]
+
+  indexes {
+    (meal_id, food_id) [pk]
+  }
+}
+
+// Many-to-Many: Food <-> Nutrient (com campo extra)
+Table Food_Nutrient {
+  food_id     int   [not null, ref: > Food.id]
+  nutrient_id int   [not null, ref: > Nutrient.id]
+  amount      float [not null]
+
+  indexes {
+    (food_id, nutrient_id) [pk]
+  }
+}
+
+// Many-to-Many: Allergen <-> Food
+Table Allergen_Food {
+  food_id     int [not null, ref: > Food.id]
+  allergen_id int [not null, ref: > Allergen.id]
+
+  indexes {
+    (food_id, allergen_id) [pk]
+  }
+}
+```
+
+</details>
 
 ## Variaveis de Ambiente
 
@@ -41,6 +159,8 @@ Exemplo:
 POSTGRES_DB=Smart-Balance
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=change-this-password
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
 BASE_URL=http://localhost:8000
 ```
 
@@ -151,6 +271,8 @@ O arquivo `.env` pode ser assim:
 POSTGRES_DB=Smart-Balance
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=change-this-password
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
 BASE_URL=http://localhost:8000
 ```
 
@@ -281,35 +403,219 @@ Por fim, teste:
 curl http://localhost:8000/health
 ```
 
-## Desenvolvimento Local sem Docker
+## Ambiente de Desenvolvimento Local (Linux)
 
-Opcionalmente, a API tambem pode ser rodada diretamente com Python.
+Esta secao descreve como rodar a API diretamente na maquina (sem o container da API),
+com o PostgreSQL isolado em Docker. Comandos testados em Linux (bash).
 
-Crie e ative o ambiente virtual:
+### 1. Versao do Python
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+- Python **3.13** (mesma versao usada no `Dockerfile`, `python:3.13-slim`).
+- Python 3.14 tambem funciona, porem os wheels das bibliotecas podem nao estar disponiveis.
+
+```bash
+python3 --version
+# ou instale com uv:
+uv python install 3.13
 ```
 
-Instale as dependencias:
+### 2. Ambiente virtual
 
-```powershell
-pip install -r requirements.txt
+Na raiz do projeto:
+
+```bash
+# com uv (recomendado - rapido e resolve torch CPU automaticamente)
+uv venv --python 3.13 .venv
+
+# ou com venv padrao
+python3.13 -m venv .venv
 ```
 
-Configure no `.env` uma URL completa do banco:
+### 3. Instalacao das dependencias
+
+```bash
+# com uv: instala o PyTorch somente-CPU (sem CUDA, ~10x menor)
+UV_TORCH_BACKEND=cpu uv pip install --python .venv/bin/python -r requirements.txt
+
+# ou com pip
+.venv/bin/pip install -r requirements.txt
+```
+
+Observacoes sobre as dependencias:
+
+- `psycopg2-binary` e usado no lugar de `psycopg2` (mesmo modulo `psycopg2` para o
+  SQLAlchemy), para nao exigir `libpq-dev`/`pg_config` na maquina de desenvolvimento.
+- O `torch` instalado e o build `+cpu`: `torch.cuda.is_available()` retorna `False`
+  e a inferencia roda em CPU. Nao e necessario ter GPU ou CUDA.
+- `UV_TORCH_BACKEND=cpu` tambem afeta `torchvision`/`torchaudio`, mantendo o conjunto coerente.
+
+### 4. Arquivo `.env`
+
+```bash
+cp .env.example .env
+```
+
+Ajuste pelo menos `POSTGRES_PASSWORD`. Exemplo de `.env` local:
 
 ```env
-SQLALCHEMY_DATABASE_URL=postgresql://postgres:senha@localhost:5432/Smart-Balance
+APP_ENV=development
+POSTGRES_DB=Smart-Balance
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=sua-senha-local
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
 BASE_URL=http://localhost:8000
+SIGLIP_MODEL_NAME=google/siglip-base-patch16-224
+HF_HOME=/home/<usuario>/.cache/huggingface
+TORCH_NUM_THREADS=4
 ```
 
-Rode a API:
+Atencao: o `shared/database.py` monta a URL de conexao a partir das variaveis
+`POSTGRES_*` (uma `SQLALCHEMY_DATABASE_URL` no `.env` e ignorada).
 
-```powershell
-uvicorn main:app --host 0.0.0.0 --port 8000
+Para a balanca/firmware na rede local, aponte `BASE_URL` para o IP da maquina
+(ex.: `http://192.168.0.13:8000`).
+
+### 5. PostgreSQL local (Docker)
+
+O `compose.dev.yml` sobe somente o banco, com volume e credenciais proprias,
+isolado do banco de producao:
+
+```bash
+docker compose -f compose.dev.yml up -d
 ```
+
+Restaure o dump (estrutura + catalogo de alimentos/nutrientes):
+
+```bash
+docker exec -i sb-postgres-dev psql -U postgres -d Smart-Balance < smart-balance.sql
+```
+
+Verifique:
+
+```bash
+docker exec -i sb-postgres-dev psql -U postgres -d Smart-Balance \
+  -c 'SELECT count(*) FROM "Food";'
+```
+
+Para derrubar o banco (mantendo os dados):
+
+```bash
+docker compose -f compose.dev.yml down
+```
+
+Para recriar do zero (apaga os dados do banco LOCAL):
+
+```bash
+docker compose -f compose.dev.yml down -v
+```
+
+### 6. Modelo de reconhecimento de alimentos (SigLIP)
+
+Nao existe um "SigLIP Runtime" como biblioteca separada, nem modelos ONNX neste
+projeto. A inferencia usa o modelo **SigLIP** `google/siglip-base-patch16-224`
+via **HuggingFace Transformers**, com **dependencia de PyTorch em runtime**
+(`SiglIp/test_01_Siglip.py`):
+
+- `transformers.AutoProcessor` / `transformers.AutoModel` carregam o modelo;
+- `torch` executa a inferencia (pre-processamento via PIL/processor, pos-processamento
+  com `softmax` + `topk` sobre os 25 rotulos definidos no proprio modulo);
+- o PyTorch instalado e o build `+cpu`: `torch.cuda.is_available()` retorna `False`
+  e a inferencia roda em **CPU**, sem exigir CUDA ou GPU.
+
+- Os pesos (~780 MB) sao baixados automaticamente do HuggingFace Hub na primeira
+  requisicao de reconhecimento e ficam no cache: `$HF_HOME/hub/models--google--siglip-base-patch16-224`.
+- Para usar uma copia local, baixe o modelo e aponte `SIGLIP_MODEL_NAME` para a
+  pasta absoluta (ou para o identificador do Hub).
+- Download manual (opcional):
+
+```bash
+.venv/bin/python -c "from huggingface_hub import snapshot_download; print(snapshot_download('google/siglip-base-patch16-224'))"
+```
+
+- `TORCH_NUM_THREADS` controla as threads de inferencia (opcional).
+
+### 7. Iniciando a FastAPI
+
+```bash
+./run_local.sh
+```
+
+O script exporta as variaveis do `.env`, avisa se o banco estiver fora do ar e roda:
+
+```bash
+.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Para encerrar: `Ctrl+C` (e `docker compose -f compose.dev.yml down` para o banco).
+
+Para deixar a API rodando em background (sobrevive ao fechamento do terminal):
+
+```bash
+set -a; . ./.env; set +a
+setsid nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload \
+  > /tmp/sb_api.log 2>&1 < /dev/null &
+# encerrar: pkill -f "uvicorn main:app"
+```
+
+### 8. Enderecos
+
+- API: `http://localhost:8000` (rede local: `http://<IP-da-maquina>:8000`)
+- Swagger (Scalar): `http://localhost:8000/docs`
+- OpenAPI JSON: `http://localhost:8000/openapi.json`
+- Health check: `http://localhost:8000/health`
+
+### 9. Testando os endpoints
+
+```bash
+# usuarios
+curl http://localhost:8000/users/get_User/2
+
+# alimentos (catalogo + nutrientes)
+curl "http://localhost:8000/foods?user_id=2"
+
+# reconhecimento de alimentos (primeira imagem)
+curl -X POST "http://localhost:8000/food-recognition/image?user_id=2" \
+  -F "file=@images/alimentos/arroz-tipo-1-cozido.jpg;type=image/jpeg"
+
+# reconhecimento com peso (nutrientes ajustados)
+curl -X POST "http://localhost:8000/food-recognition/image/weight?user_id=2&weight=150" \
+  -F "file=@images/alimentos/feijao-preto-cozido.jpg;type=image/jpeg"
+
+# refeicao
+curl -X POST http://localhost:8000/meals \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Almoco","user_id":2,"consumed_at":"2026-11-20T12:30:00","calories":0,"weight_g":350,"list_foods_ids":[1,2],"saved_meal":true}'
+```
+
+As imagens em `images/alimentos/` sao os arquivos de teste reais do projeto
+(25 alimentos, correspondentes aos rotulos do modelo).
+
+Atencao ao contrato de `consumed_at` em `POST /meals`: use data-hora ISO 8601
+(ex.: `2026-11-20T12:30:00`). O validador `"%H:%M"` existente no codigo nao e
+aplicado pelo Pydantic (validacao de tipo acontece antes).
+
+O fluxo de reconhecimento guarda a ultima imagem de cada usuario em memoria:
+a primeira chamada classifica a imagem inteira (`"first_image": true`) e as
+seguintes comparam com a anterior e classificam apenas a regiao alterada
+(`"changed": true`, com `bbox`). Para reiniciar o fluxo, basta reiniciar a API.
+
+Nao existe suite de testes automatizados no repositorio. Os arquivos em
+`test/rand/` sao scripts diagnosticos antigos (com credenciais fixas) e nao
+devem ser considerados validacao. A validacao real e feita pelos comandos
+acima, contra a API rodando e com imagens reais de `images/alimentos/`.
+
+Para evitar o aviso de rate limit do HuggingFace no primeiro download do
+modelo, exporte um token (opcional): `export HF_TOKEN=<seu-token>`.
+
+### 10. Compatibilidade com o firmware (rede local)
+
+- Os endpoints sao HTTP direto (JSON + `multipart/form-data`); o firmware em C/C++
+  nao precisa de CORS.
+- Nao ha middleware de CORS configurado na API. Ele so seria necessario para
+  clientes web (browser) consumirem a API de outra origem.
+- Para o firmware acessar a API, use `http://<IP-da-maquina>:8000` em `BASE_URL`
+  e verifique se a porta 8000 esta liberada no firewall local.
 
 ## Observacoes Importantes
 

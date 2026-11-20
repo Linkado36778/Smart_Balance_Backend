@@ -217,5 +217,13 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# static folder
+static
+
 # Database dumps
 backups/
+
+# Artefatos de runtime da API (criados e removidos pela aplicacao)
+tmp/
+output/
+qr_codes/

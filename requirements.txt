@@ -37,7 +37,9 @@ orjson==3.12.0
 packaging==26.3
 pillow==13.0.0
 protobuf==6.31.1
-psycopg2==2.9.12
+# psycopg2 (source) exige libpq-dev/pg_config; o binário mantém o mesmo módulo
+# "psycopg2" para o SQLAlchemy e instala sem toolchain de compilação.
+psycopg2-binary==2.9.12
 pwdlib==0.3.1
 pycparser==3.0
 pydantic==2.11.7

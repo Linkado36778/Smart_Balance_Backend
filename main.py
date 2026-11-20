@@ -9,10 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 from sqlalchemy import text
 
-from application.controller import user_management_router
-from application.controller import food_search_router
+from application.controller import user_controller, food_controller, auth_controller, vision_recognition_controller
 from application.controller import food_recognition
-from application.models.return_model import ReturnException
+from application.models.return_models import ReturnException
 from shared.database import engine, initialize_database
 import json
 
@@ -30,10 +29,17 @@ app = FastAPI(
     description="API for user management and food search functionalities in the Smart Balance application.",
     default_response_class=UTF8JSONResponse
 )
-app.include_router(user_management_router.router)
-app.include_router(food_search_router.router)
+
+#region Routers
+
+app.include_router(auth_controller.router)
+app.include_router(user_controller.router)
+app.include_router(food_controller.router)
+app.include_router(vision_recognition_controller.router)
 app.include_router(food_recognition.router)
 
+
+#region Lifecycle
 
 @app.on_event("startup")
 def startup_event():
@@ -65,6 +71,9 @@ def cleanup_qr_codes():
     if QR_CODES_DIR.exists():
         shutil.rmtree(QR_CODES_DIR)
 
+
+#region Exception
+
 @app.exception_handler(ReturnException)
 async def return_exception_handler(request: Request, exc: ReturnException):
     """Custom exception handler for ReturnException, returning a standardized JSON response."""
@@ -77,6 +86,9 @@ async def return_exception_handler(request: Request, exc: ReturnException):
         response_body["data"] = exc.data
 
     return JSONResponse(status_code=exc.status_code, content=response_body)
+
+
+#region Docs
 
 @app.get("/docs", include_in_schema=False)
 async def scalar_html():
@@ -109,12 +121,15 @@ async def scalar_html():
         hide_client_button=False,  # esconde o botão de gerar código cliente
     )
 
+
+#region Root
+
 @app.get("/")
 def read_root():
     """Root endpoint providing basic information about the API."""
     return {
         "message": "API running",
-        "routes": ["/users/create_User", "/users/get_User/{user_id}"]
+        "routes": ["/user", "/user/{user_id}"]
     }
 
 
