@@ -88,6 +88,7 @@ class MealFoodAssociation(Base):
         ForeignKey('Food.id', ondelete="CASCADE"),
         primary_key=True
     )
+    food_weight_g: Mapped[float] = mapped_column()
 
 
 class DietFoodAssociation(Base):

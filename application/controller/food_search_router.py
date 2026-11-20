@@ -48,11 +48,11 @@ class PostCreateMealBodyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    user_id: int
     consumed_at: datetime
-    calories: float = 0.0
-    weight_g: float = 0.0
+    # calories: float = 0.0
+    # weight_g: float
     list_foods_ids: List[int] = Field(default_factory=list)
+    list_foods_weights: List[float] = Field(default_factory=list)
     saved_meal: bool = False
 
     @field_validator("consumed_at")
@@ -181,6 +181,44 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
         .filter(food_nutrient.c.food_id == food_id)
         .all()
     )
+
+
+def calculate_meal_totals(db: Session, meal: "PostCreateMealBodyRequest"):
+    """Validates the meal foods/weights and returns (foods, total_calories, total_nutrients),
+    scaling each food's per-100g nutrient amounts to its consumed weight."""
+
+    if not meal.list_foods_ids:
+        raise HTTPException(status_code=400, detail="At least one food ID must be provided")
+
+    if len(meal.list_foods_weights) != len(meal.list_foods_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="list_foods_weights must have the same length as list_foods_ids"
+        )
+
+    if any(weight <= 0 for weight in meal.list_foods_weights):
+        raise HTTPException(status_code=400, detail="All food weights must be greater than zero")
+
+    total_calories = 0.0
+    total_nutrients: Dict[str, float] = {}
+    foods: List[Food] = []
+
+    for food_id, food_weight in zip(meal.list_foods_ids, meal.list_foods_weights):
+        food = db.query(Food).filter(Food.id == food_id).first()
+
+        if food is None:
+            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
+
+        foods.append(food)
+
+        for nutrient, nutrient_amount in get_food_nutrients(db, food.id):
+            amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
+            # Nutrient amounts are stored per 100g; scale them to the consumed weight
+            adjusted_amount = amount_per_100g * food_weight / 100.0
+            total_nutrients[nutrient.name] = total_nutrients.get(nutrient.name, 0.0) + adjusted_amount
+            total_calories += adjusted_amount * (nutrient.calories_per_unit or 0.0)
+
+    return foods, total_calories, total_nutrients
 
 # Função integrada no list_foods para buscar os alérgenos do usuário para um alimento específico
 # def get_user_allergens_by_food(user_id: int, food_id: int, db: DbDependency):
@@ -584,6 +622,10 @@ def list_user_meals(user_id: int, db: DbDependency):
             .filter(MealFoodAssociation.meal_id == meal.id)
             .all()
         )
+
+        for weight in db.query(MealFoodAssociation.food_weight_g).filter(MealFoodAssociation.meal_id == meal.id).all():
+            weight_value = weight[0]
+
         result.append({
             "id": meal.id,
             "name": meal.name,
@@ -597,6 +639,7 @@ def list_user_meals(user_id: int, db: DbDependency):
                     "name": food.name,
                     "category_id": food.category_id,
                     "brand_id": food.brand_id,
+                    "weight_g": weight_value,
                     "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
                 }
                 for food in foods
@@ -611,43 +654,24 @@ def list_user_meals(user_id: int, db: DbDependency):
         200: {"model": Meal, "description": "Meal created successfully"},
     }
 )
-def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
+def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency, user_id: int):
     """Calcula calorias/nutrientes e cadastra uma refeição."""
 
-    if not meal.list_foods_ids:
-        raise HTTPException(status_code=400, detail="At least one food ID must be provided")
-
-    user = db.query(User).filter(User.id == meal.user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()
 
     if user is None:
-        raise HTTPException(status_code=400, detail=f"User_id: {meal.user_id} dont exist")
+        raise HTTPException(status_code=400, detail=f"User_id: {user_id} dont exist")
 
-    total_calories = 0.0
-    total_nutrients: Dict[str, float] = {}
-    foods: List[Food] = []
+    foods, total_calories, _ = calculate_meal_totals(db, meal)
 
-    for food_id in meal.list_foods_ids:
-        food = db.query(Food).filter(Food.id == food_id).first()
-
-        if food is None:
-            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
-        
-        foods.append(food)
-
-        item_calories = 0.0
-        for nutrient, nutrient_amount in get_food_nutrients(db, food.id):
-            amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
-            total_nutrients[nutrient.name] = total_nutrients.get(nutrient.name, 0.0) + amount_per_100g
-            item_calories += amount_per_100g * (nutrient.calories_per_unit or 0.0)
-
-        total_calories += item_calories
+    total_weight = sum(meal.list_foods_weights)
 
     new_meal = Meal(
         name = meal.name,
-        user_id = meal.user_id,
+        user_id = user.id,
         consumed_at = meal.consumed_at,
         calories = total_calories,
-        weight_g = meal.weight_g,
+        weight_g = total_weight,
         saved_meal = meal.saved_meal
     )
 
@@ -658,16 +682,18 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency):
         db.add(new_meal)
         db.flush()
 
-        for food in foods:
+        for weight, food in zip(meal.list_foods_weights, foods):
             assoc = MealFoodAssociation(
                 meal_id=new_meal.id,
                 food_id=food.id,
+                food_weight_g=weight
             )
             db.add(assoc)
 
         db.commit()
         db.refresh(new_meal)
-        return new_meal
+
+    return new_meal
 
 
 @router.patch("/meals/{meal_id}/{user_id}", responses={200: {"model": Meal, "description": "Meal updated successfully"}})
@@ -679,29 +705,27 @@ def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db:
     if not updated_meal:
         raise HTTPException(status_code=404, detail="Meal not found")
 
-    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).all()
-    for assoc in deleted_associations:
-        db.delete(assoc)
+    total_weight = sum(meal.list_foods_weights)
+    if total_weight <= 0:
+        raise HTTPException(status_code=400, detail="Invalid meal weight")
 
-    for field, value in meal.model_dump().items():
-        setattr(updated_meal, field, value)
+    # Validate and recalculate before touching the database
+    foods, total_calories, _ = calculate_meal_totals(db, meal)
 
-    foods: List[Food] = []
+    updated_meal.name = meal.name
+    updated_meal.consumed_at = meal.consumed_at
+    updated_meal.calories = total_calories
+    updated_meal.weight_g = total_weight
+    updated_meal.saved_meal = meal.saved_meal
 
-    for food_id in meal.list_foods_ids:
-        food = db.query(Food).filter(Food.id == food_id).first()
-    
-        if food is None:
-            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
-            
-        foods.append(food)
+    db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).delete()
 
-    for new_food in foods:
-        association = MealFoodAssociation(
+    for food, food_weight in zip(foods, meal.list_foods_weights):
+        db.add(MealFoodAssociation(
             meal_id=updated_meal.id,
-            food_id=new_food.id,
-            )
-        db.add(association)
+            food_id=food.id,
+            food_weight_g=food_weight
+        ))
 
     db.commit()
     db.refresh(updated_meal)
