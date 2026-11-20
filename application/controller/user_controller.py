@@ -1,29 +1,36 @@
 """Controller for user management, including user and nutricionist creation and retrieval."""
 
+import os
+import re
+import secrets
+import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, List, Optional
+from urllib.parse import urlencode
+
+import qrcode
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
-from urllib.parse import urlencode
 
 from shared.database import get_db
-from application.models.application_models import Allergen, Balance, Diet, DietFoodAssociation, Food, MealFoodAssociation, User, Nutricionist, UserAllergenAssociation, Pairing, UserBalanceAssociation
-from application.models.return_model import ReturnModel
-import re
-import secrets
-import hashlib
-import qrcode
-import os
+from application.models.application_models import Allergen, Balance, Diet, DietFoodAssociation, Food, User, Nutricionist, UserAllergenAssociation, Pairing, UserBalanceAssociation
+from application.models.return_models import ReturnModel, ReturnSuccessUserModel
 
 BASE_URL = os.environ.get("BASE_URL") or "http://localhost:8000"
 QR_CODES_DIR = Path(__file__).resolve().parents[2] / "qr_codes"
 
-router = APIRouter(prefix="/users", tags=["users"])
+#region Setup
+
+router = APIRouter(tags=["User"])
+DbDependency = Annotated[Session, Depends(get_db)]
 password_hash = PasswordHash.recommended()
+EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+#region Schemas
 
 class PostCreateBalanceBodyRequest(BaseModel):
     """Base model for balance creation."""
@@ -55,6 +62,10 @@ class PostAllergenUser(BaseModel):
     user_id: int
     allergen_id: int
 
+class PostCreateAllergenBodyRequest(BaseModel):
+    """Base model for allergen creation."""
+    name: str
+
 class PostCreateUserBodyRequest(BaseModel):
     """Base model for user creation."""
     email: str
@@ -83,7 +94,7 @@ class PostCreateNutricionistBodyRequest(BaseModel):
     phone: str
     crn: str
 
-DbDependency = Annotated[Session, Depends(get_db)]
+#region Helpers
 
 def nutricionist_validate_format(nuricionist_crn: str):
     crn_pattern = r"^CRN-\d{1} \d{5}$"
@@ -91,37 +102,65 @@ def nutricionist_validate_format(nuricionist_crn: str):
         return True
     return False
 
-# region User
+def serialize_user(user: User) -> dict:
+    """Public representation of a user (never exposes the password hash)."""
+    return {
+        "id": user.id,
+        "email": user.email,
+        "birthdate": user.birthdate,
+        "weight_kg": user.weight_kg,
+        "height_m": user.height_m,
+        "sex": user.sex,
+        "created_at": user.created_at,
+        "is_active": user.is_active,
+        "nutricionist_id": user.nutricionist_id,
+    }
+
+def serialize_nutricionist(nutricionist: Nutricionist) -> dict:
+    """Public representation of a nutricionist (never exposes the password hash)."""
+    return {
+        "id": nutricionist.id,
+        "email": nutricionist.email,
+        "phone": nutricionist.phone,
+        "crn": nutricionist.crn,
+        "created_at": nutricionist.created_at,
+    }
+
+#region User
 
 @router.post(
-    "/create_User",
-    responses={
-        200: {"model": PostCreateUserBodyRequest, "description": "User created successfully"},
+    "/user",
+    responses = {
+        200: {"model": ReturnModel, "description": "User created successfully"},
     }
 )
-def create_user(user: PostCreateUserBodyRequest, db: DbDependency):
+def create_user(body: PostCreateUserBodyRequest, db: DbDependency):
     """Create a new user in the database."""
 
+    if not re.fullmatch(EMAIL_REGEX, body.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
+
     new_user = User(
-        email = user.email,
-        birthdate = user.birthdate,
-        weight_kg = user.weight_kg,
-        height_m = user.height_m,
-        sex = user.sex,
-        password = password_hash.hash(user.password),
-        is_active = user.is_active,
-        nutricionist_id = user.nutricionist_id,
+        email = body.email,
+        birthdate = body.birthdate,
+        weight_kg = body.weight_kg,
+        height_m = body.height_m,
+        sex = body.sex,
+        password = password_hash.hash(body.password),
+        is_active = body.is_active,
+        nutricionist_id = body.nutricionist_id,
     )
 
     if new_user is None:
         raise HTTPException(status_code=400, detail="User creation failed")
 
-    if db.query(User).filter(User.email == user.email).first():
+    if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
     return ReturnModel(
         message = "User created successfully",
         data = {
@@ -143,6 +182,12 @@ def update_user(user_id: int, user: PostCreateUserBodyRequest, db: DbDependency)
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if not re.fullmatch(EMAIL_REGEX, user.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
+
+    if db.query(User).filter(User.email == user.email, User.id != user_id).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
 
     db_user.email = user.email
     db_user.birthdate = user.birthdate
@@ -185,14 +230,32 @@ def delete_user(user_id: int, db: DbDependency):
         success=True
     )
 
-@router.get("/get_User/{user_id}")
+@router.get(
+    "/user/{user_id}",
+    responses = {
+        200: {"model": ReturnModel[ReturnSuccessUserModel], "description": "User getted successfully"},
+    }
+)
 def get_user(user_id: int, db: DbDependency):
     """Retrieve a user by their ID."""
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    return db_user
+    user = db.query(User).filter(User.id == user_id).first()
 
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return ReturnModel(
+        message = "User getted successfully",
+        data = ReturnSuccessUserModel(
+            id = user.id,
+            email = user.email,
+            birthdate = user.birthdate,
+            weight_kg = user.weight_kg,
+            height_m = user.height_m,
+            sex = user.sex,
+            created_at = user.created_at
+        ),
+        success = True
+    )
 
 @router.get("/login_User/{user_email}/{user_password}")
 def login_user(user_email: str, user_password: str, db: DbDependency):
@@ -202,7 +265,7 @@ def login_user(user_email: str, user_password: str, db: DbDependency):
         raise HTTPException(status_code=404, detail="User not found")
     if not password_hash.verify(user_password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    return db_user
+    return serialize_user(db_user)
 
 # Endpoint abaixo descontinuado, pois não é necessário para a funcionalidade atual do sistema.
 
@@ -224,31 +287,45 @@ def login_user(user_email: str, user_password: str, db: DbDependency):
 # )
 #     return allergens
 
-# region Nutricionist
+#region Nutricionist
 
-@router.post("/create_Nutricionist")
-def create_nutricionist(nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
+@router.post(
+    "/nutricionist",
+    responses = {
+        200: {"model": ReturnModel, "description": "Nutricionist created successfully"},
+    }
+)
+def create_nutricionist(body: PostCreateNutricionistBodyRequest, db: DbDependency):
     """Create a new nutricionist in the database."""
+
+    if not re.fullmatch(EMAIL_REGEX, body.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
+
     new_nutricionist = Nutricionist(
-        email = nutricionist.email,
-        password = password_hash.hash(nutricionist.password),
-        phone = nutricionist.phone,
-        crn = nutricionist.crn
+        email = body.email,
+        password = password_hash.hash(body.password),
+        phone = body.phone,
+        crn = body.crn
     )
 
-    if not nutricionist_validate_format(nutricionist.crn):
+    if not nutricionist_validate_format(body.crn):
         raise HTTPException(status_code=400, detail="Invalid CRN format. Expected format: CRN-X XXXXX")
 
     if new_nutricionist is False:
         raise HTTPException(status_code=400, detail="Nutricionist creation failed")
 
-    if db.query(Nutricionist).filter(Nutricionist.email == nutricionist.email).first():
+    if db.query(Nutricionist).filter(Nutricionist.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
     db.add(new_nutricionist)
     db.commit()
     db.refresh(new_nutricionist)
-    return new_nutricionist
+
+    return ReturnModel(
+        message = "Nutricionist created successfully",
+        data = None,
+        success = True
+    )
 
 @router.get("/get_Nutricionist/{nutricionist_id}")
 def get_nutricionist(nutricionist_id: int, db: DbDependency):
@@ -256,7 +333,7 @@ def get_nutricionist(nutricionist_id: int, db: DbDependency):
     db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
     if db_nutricionist is None:
         raise HTTPException(status_code=404, detail="Nutricionist not found")
-    return db_nutricionist
+    return serialize_nutricionist(db_nutricionist)
 
 @router.patch("/update_Nutricionist/{nutricionist_id}")
 def update_nutricionist(nutricionist_id: int, nutricionist: PostCreateNutricionistBodyRequest, db: DbDependency):
@@ -264,6 +341,15 @@ def update_nutricionist(nutricionist_id: int, nutricionist: PostCreateNutricioni
     db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
     if db_nutricionist is None:
         raise HTTPException(status_code=404, detail="Nutricionist not found")
+
+    if not re.fullmatch(EMAIL_REGEX, nutricionist.email):
+        raise HTTPException(status_code=400, detail="Email not valid")
+
+    if not nutricionist_validate_format(nutricionist.crn):
+        raise HTTPException(status_code=400, detail="Invalid CRN format. Expected format: CRN-X XXXXX")
+
+    if db.query(Nutricionist).filter(Nutricionist.email == nutricionist.email, Nutricionist.id != nutricionist_id).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
 
     db_nutricionist.email = nutricionist.email
     db_nutricionist.password = password_hash.hash(nutricionist.password)
@@ -307,7 +393,7 @@ def login_nutricionist(nutricionist_email: str, nutricionist_password: str, db: 
         raise HTTPException(status_code=404, detail="Nutricionist not found")
     if not password_hash.verify(nutricionist_password, db_nutricionist.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    return db_nutricionist
+    return serialize_nutricionist(db_nutricionist)
 
 @router.post("/link_user_nutricionist")
 def link_user_nutricionist(user_id: int, nutricionist_id: int, db: DbDependency):
@@ -359,13 +445,28 @@ def list_user_data_by_nutricionist(nutricionist_id: int, db: DbDependency):
         .filter(User.nutricionist_id == nutricionist_id)
         .all()
     )
-    return users
+    return [serialize_user(user) for user in users]
 
 # region Allergen
 
 @router.post("/add_allergen_to_user")
 def add_allergen_to_user(allergen_User: PostAllergenUser, db: DbDependency):
     """Add an allergen to a user."""
+    if db.query(User).filter(User.id == allergen_User.user_id).first() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if db.query(Allergen).filter(Allergen.id == allergen_User.allergen_id).first() is None:
+        raise HTTPException(status_code=404, detail="Allergen not found")
+
+    existing_association = (
+        db.query(UserAllergenAssociation)
+        .filter(UserAllergenAssociation.user_id == allergen_User.user_id)
+        .filter(UserAllergenAssociation.allergen_id == allergen_User.allergen_id)
+        .first()
+    )
+    if existing_association is not None:
+        raise HTTPException(status_code=400, detail="Allergen already associated with user")
+
     new_association = UserAllergenAssociation(
         user_id=allergen_User.user_id,
         allergen_id=allergen_User.allergen_id
@@ -419,7 +520,7 @@ def remove_allergen_from_user(user_id: int, allergen_id: int, db: DbDependency):
     )
 
 @router.post("/add_allergen")
-def add_allergen(allergen: Allergen, db: DbDependency):
+def add_allergen(allergen: PostCreateAllergenBodyRequest, db: DbDependency):
     """Add a new allergen to the database."""
     new_allergen = Allergen(
         name=allergen.name
@@ -466,6 +567,9 @@ def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: Post
     db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
     if db_nutricionist is None:
         raise HTTPException(status_code=404, detail="Nutricionist not found")
+
+    if diet.user_id != user_id or diet.nutricionist_id != nutricionist_id:
+        raise HTTPException(status_code=400, detail="Body user_id/nutricionist_id must match the route parameters")
 
     new_diet = Diet(
         name = diet.name,
@@ -653,7 +757,7 @@ def generate_qr_code(db: DbDependency):
     db.refresh(db_pairing)
 
     query_string = urlencode({"token": pairing_token})
-    pairing_url = f"{BASE_URL}/users/pair-scale?&{query_string}"
+    pairing_url = f"{BASE_URL}/pair-scale?{query_string}"
 
     qr_image = qrcode.make(pairing_url)
     QR_CODES_DIR.mkdir(exist_ok=True)
@@ -694,6 +798,21 @@ def pair_scale(user_id: int, balance_id: int, token: str, db: DbDependency):
 
     if db_pairing.expires_at < datetime.now():
         raise HTTPException(status_code=400, detail="Token expired")
+
+    if db.query(User).filter(User.id == user_id).first() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if db.query(Balance).filter(Balance.id == balance_id).first() is None:
+        raise HTTPException(status_code=404, detail="Balance not found")
+
+    already_paired = (
+        db.query(UserBalanceAssociation)
+        .filter(UserBalanceAssociation.user_id == user_id)
+        .filter(UserBalanceAssociation.balance_id == balance_id)
+        .first()
+    )
+    if already_paired is not None:
+        raise HTTPException(status_code=400, detail="Scale already paired with this user")
 
     associated_balance = (
         UserBalanceAssociation(

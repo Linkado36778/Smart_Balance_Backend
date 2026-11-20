@@ -7,18 +7,22 @@ from unicodedata import normalize
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
-from application.models.application_models import CreatedFood, Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, MealFoodAssociation, CreatedFoodNutrientAssociation, CreatedFoodAllergenAssociation
-from application.models.return_model import ReturnModel, ReturnException
+from application.models.application_models import CreatedFood, Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, CreatedFoodNutrientAssociation, CreatedFoodAllergenAssociation
+from application.models.return_models import ReturnModel, ReturnException
 
 
-router = APIRouter(tags=["food search"])
+#region Setup
 
+router = APIRouter(tags=["Food"])
+DbDependency = Annotated[Session, Depends(get_db)]
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")  # Default to localhost if not set
 
-# region Schemas
+#region Schemas
 
 class NutrientAmount(BaseModel):
     """TypedDict for nutrient amount input, allowing flexible formats."""
@@ -55,26 +59,30 @@ class PostCreateMealBodyRequest(BaseModel):
     list_foods_weights: List[float] = Field(default_factory=list)
     saved_meal: bool = False
 
-    @field_validator("consumed_at")
+    @field_validator("consumed_at", mode="before")
     def parse_consumed_at(cls, value):
         """Ensure consumed_at is a datetime object."""
-        if isinstance(value, str):
+        if isinstance(value, str) and len(value) <= 5 and ":" in value:
             try:
                 return datetime.strptime(value, "%H:%M")
             except ValueError:
                 raise ValueError("consumed_at must be in H:M format")
         return value
 
-# region Setup
+#region Helpers
 
-DbDependency = Annotated[Session, Depends(get_db)]
-
-# region Helpers
+def calculate_meal_calories(db: Session, foods: List["Food"]) -> float:
+    """Sum the calories of the given foods using their per-100g nutrient amounts."""
+    total_calories = 0.0
+    for food in foods:
+        for nutrient, nutrient_amount in get_food_nutrients(db, food.id):
+            amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
+            total_calories += amount_per_100g * (nutrient.calories_per_unit or 0.0)
+    return total_calories
 
 def normalize_text(value: str) -> str:
     """Normalize text for consistent comparisons."""
     return normalize("NFKD", value.strip().lower()).encode("ascii", "ignore").decode("ascii")
-
 
 def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]):
     """Fetch a nutrient by its ID or name. If a string is provided, it will be normalized for comparison."""
@@ -91,7 +99,6 @@ def get_nutrient_by_identifier(db: Session, nutrient_identifier: Union[int, str]
         None,
     )
 
-
 def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
     """Parse nutrient amount from various formats, ensuring it returns a float."""
     if value is None:
@@ -101,10 +108,7 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
         return float(value)
 
     if isinstance(value, str):
-        try:
-            return float(value.replace(",", "."))
-        except ValueError:
-            return 0.0
+        return float(value.replace(",", "."))
 
     if isinstance(value, dict):
         possible_keys = (
@@ -117,12 +121,10 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
         for key in possible_keys:
             if key in value:
                 return parse_nutrient_amount(value[key], nutrient)
-        return 0.0
 
     if isinstance(value, list):
         if len(value) == 1:
             return parse_nutrient_amount(value[0], nutrient)
-        return 0.0
 
     return 0.0
 
@@ -238,7 +240,7 @@ def calculate_meal_totals(db: Session, meal: "PostCreateMealBodyRequest"):
 # )
 #     return allergens
 
-# region Foods
+#region Foods
 
 @router.get("/foods")
 def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
@@ -257,10 +259,10 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
     allergic_food_ids = {
         food_id
         for (food_id,) in (
-            db.query(CreatedFoodAllergenAssociation.created_food_id)
+            db.query(AllergenFoodAssociation.food_id)
             .join(
                 UserAllergenAssociation,
-                UserAllergenAssociation.allergen_id == CreatedFoodAllergenAssociation.allergen_id,
+                UserAllergenAssociation.allergen_id == AllergenFoodAssociation.allergen_id,
             )
             .filter(UserAllergenAssociation.user_id == user_id)
             .all()
@@ -297,14 +299,19 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
 
 
 @router.get("/foods/{food_id}")
-def list_created_foods(db: DbDependency, user_id: int):
-    """Lista alimentos criados pelo usuário e informa se o usuario e alergico a cada um."""
+def list_created_foods(food_id: int, db: DbDependency, user_id: int):
+    """Retorna um alimento criado pelo usuário e informa se o usuario e alergico a ele."""
 
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    created_food = db.query(CreatedFood).filter(CreatedFood.user_id == user_id).first()
+    created_food = (
+        db.query(CreatedFood)
+        .filter(CreatedFood.id == food_id)
+        .filter(CreatedFood.user_id == user_id)
+        .first()
+    )
     if created_food is None:
         raise HTTPException(status_code=404, detail="Created food not found")
 
@@ -348,26 +355,29 @@ def list_created_foods(db: DbDependency, user_id: int):
 
 
 @router.post("/foods")
-def create_food(food: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
+def create_food(body: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
     """Cadastra um novo alimento com seus nutrientes."""
     try:
-        existing = db.query(CreatedFood).filter(CreatedFood.name.ilike(f"{food.name}")).first()
+        if db.query(User).filter(User.id == user_id).first() is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        existing = db.query(CreatedFood).filter(CreatedFood.name.ilike(body.name)).first()
 
         if existing is not None:
             raise HTTPException(status_code=400, detail="Food already exists")
 
         # Create food with only column fields
         new_food = CreatedFood(
-            name=food.name,
+            name=body.name,
             user_id=user_id,
-            category_id=food.category_id,
-            brand_id=food.brand_id,
+            category_id=body.category_id,
+            brand_id=body.brand_id,
         )
 
         db.add(new_food)
         db.flush()
 
-        for allergen_id in food.allergen_ids:
+        for allergen_id in body.allergen_ids:
             allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
 
             if allergen is None:
@@ -383,7 +393,7 @@ def create_food(food: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int
             db.add(assoc)
 
         # create association mapped instances
-        for nutrient_item in food.nutrients:
+        for nutrient_item in body.nutrients:
             nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
 
             if nutrient is None:
@@ -404,10 +414,13 @@ def create_food(food: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int
 
         return ReturnModel(
             message="Food created successfully",
-            data=new_food,
+            data=None,
             success=True
         )
 
+    except (HTTPException, IntegrityError):
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -484,6 +497,9 @@ def update_food(food_id: int, food: PostCreatedFoodBodyRequest, db: DbDependency
             success=True
         )
 
+    except (HTTPException, IntegrityError):
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -522,6 +538,9 @@ def delete_food(food_id: int, db: DbDependency, user_id: int):
             success=True
         )
 
+    except (HTTPException, IntegrityError):
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -529,15 +548,26 @@ def delete_food(food_id: int, db: DbDependency, user_id: int):
             success=False,
         ) from err
 
-# region Brands
+#region Brands
 
-@router.get("/brands")
-def search_brands(brand_name: str, db: DbDependency):
+@router.get(
+    "/brands",
+    responses={
+        200: {"model": ReturnModel[Brand], "description": "Brands getted successfully"},
+    }
+)
+def search_brands(query_brand_name: str, db: DbDependency):
     """Busca marcas pelo nome (parcial)."""
-    brands = db.query(Brand).filter(Brand.name.ilike(f"%{brand_name}%")).all()
-    if not brands:
+    brands = db.query(Brand).filter(Brand.name.ilike(f"%{query_brand_name}%")).all()
+
+    if brands is None:
         raise HTTPException(status_code=404, detail="Brand not found")
-    return brands
+    
+    return ReturnModel(
+        message="Brands getted successfully",
+        data=brands,
+        success=True
+    )
 
 @router.patch("/brands/{brand_id}")
 def update_brand(brand_id: int, brand: PostCreateBrandBodyRequest, db: DbDependency):
@@ -562,38 +592,64 @@ def delete_brand(brand_id: int, db: DbDependency):
     db.commit()
     return {"message": "Brand deleted successfully"}
 
-@router.post("/brands")
-def create_brand(brand: PostCreateBrandBodyRequest, db: DbDependency):
+@router.post(
+    "/brands",
+    responses={
+        200: {"model": ReturnModel, "description": "Brands created successfully"},
+    }
+)
+def create_brand(body: PostCreateBrandBodyRequest, db: DbDependency):
     """Cadastra uma nova marca."""
-    existing = db.query(Brand).filter(Brand.name.ilike(f"%{brand.name}%")).first()
+    existing = db.query(Brand).filter(func.lower(Brand.name) == body.name.strip().lower()).first()
+
     if existing is not None:
         raise HTTPException(status_code=400, detail="Brand already exists")
 
     new_brand = Brand(
-        name = brand.name
+        name=body.name
     )
 
     db.add(new_brand)
     db.commit()
     db.refresh(new_brand)
-    return new_brand
 
+    return ReturnModel(
+        message="Brands created successfully",
+        data=None,
+        success=True
+    )
 
-# region Categories
+#region Categories
 
-@router.get("/categories")
+@router.get(
+    "/categories",
+    responses={
+        200: {"model": ReturnModel[Category], "description": "Categories getted successfully"},
+    }
+)
 def list_categories(db: DbDependency):
     """Lista todas as categorias de alimentos."""
-    return db.query(Category).order_by(Category.id).all()
+    return ReturnModel(
+        message="Categories getted successfully",
+        data=db.query(Category).order_by(Category.id).all(),
+        success=True
+    )
 
+#region Nutrients
 
-# region Nutrients
-
-@router.get("/nutrients")
-def list_all_nutrients(db: DbDependency):
+@router.get(
+    "/nutrients",
+    responses={
+        200: {"model": ReturnModel[Nutrient], "description": "Nutrients getted successfully"},
+    }
+)
+def list_nutrients(db: DbDependency):
     """Lista todos os nutrientes disponíveis."""
-    return db.query(Nutrient).order_by(Nutrient.id).all()
-
+    return ReturnModel(
+        message="Nutrients getted successfully",
+        data=db.query(Nutrient).order_by(Nutrient.id).all(),
+        success=True
+    )
 
 @router.get("/nutrients/{food_id}")
 def list_micro_nutrients(food_id: int, db: DbDependency):
@@ -606,7 +662,7 @@ def list_micro_nutrients(food_id: int, db: DbDependency):
         FoodNutrientAssociation.food_id == food_id
     ).all()
 
-# region Meals
+#region Meals
 
 @router.get("/meals")
 def list_user_meals(user_id: int, db: DbDependency):
@@ -651,7 +707,7 @@ def list_user_meals(user_id: int, db: DbDependency):
 @router.post(
     "/meals",
     responses={
-        200: {"model": Meal, "description": "Meal created successfully"},
+        200: {"model": ReturnModel, "description": "Meal created successfully"},
     }
 )
 def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency, user_id: int):
@@ -740,9 +796,7 @@ def delete_meal(meal_id: int, user_id: int, db: DbDependency):
     if not meal_to_delete:
         raise HTTPException(status_code=404, detail="Meal not found")
 
-    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == meal_to_delete.id).all()
-    for assoc in deleted_associations:
-        db.delete(assoc)
+    db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == meal_to_delete.id).delete()
 
     db.delete(meal_to_delete)
     db.commit()

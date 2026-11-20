@@ -7,7 +7,7 @@ import binascii
 import os
 import cv2
 
-from application.controller.food_search_router import get_food_nutrients_by_weight
+from application.controller.food_controller import get_food_nutrients_by_weight
 from application.models.application_models import Food, Nutrient
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
@@ -210,7 +210,9 @@ LABELS = [
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-model_name = "google/siglip-base-patch16-224"
+# Pode ser um identificador do HuggingFace Hub ou o caminho absoluto de uma
+# pasta local com o modelo ja baixado (configuravel via variavel de ambiente).
+model_name = os.getenv("SIGLIP_MODEL_NAME", "google/siglip-base-patch16-224")
 
 processor = None
 model = None
@@ -667,6 +669,12 @@ def _get_model():
 
     if processor is None or model is None:
         print(f"Using device: {device}")
+
+        # Numero de threads do PyTorch durante a inferencia (opcional).
+        num_threads = os.getenv("TORCH_NUM_THREADS")
+        if num_threads:
+            torch.set_num_threads(int(num_threads))
+
         processor = AutoProcessor.from_pretrained(model_name)
         model = AutoModel.from_pretrained(model_name).to(device)
         model.eval()
