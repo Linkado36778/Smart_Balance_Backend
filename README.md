@@ -569,7 +569,7 @@ setsid nohup .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 --r
 
 ```bash
 # usuarios
-curl http://localhost:8000/users/get_User/2
+curl http://localhost:8000/user/2
 
 # alimentos (catalogo + nutrientes)
 curl "http://localhost:8000/foods?user_id=2"
@@ -591,19 +591,17 @@ curl -X POST http://localhost:8000/meals \
 As imagens em `images/alimentos/` sao os arquivos de teste reais do projeto
 (25 alimentos, correspondentes aos rotulos do modelo).
 
-Atencao ao contrato de `consumed_at` em `POST /meals`: use data-hora ISO 8601
-(ex.: `2026-11-20T12:30:00`). O validador `"%H:%M"` existente no codigo nao e
-aplicado pelo Pydantic (validacao de tipo acontece antes).
+`consumed_at` em `POST /meals` e `PATCH /meals` aceita data-hora ISO 8601
+(ex.: `2026-11-20T12:30:00`) ou apenas `HH:MM` (ex.: `12:30`, gravado com a
+data 1900-01-01, conforme o validador existente).
 
 O fluxo de reconhecimento guarda a ultima imagem de cada usuario em memoria:
 a primeira chamada classifica a imagem inteira (`"first_image": true`) e as
 seguintes comparam com a anterior e classificam apenas a regiao alterada
 (`"changed": true`, com `bbox`). Para reiniciar o fluxo, basta reiniciar a API.
 
-Nao existe suite de testes automatizados no repositorio. Os arquivos em
-`test/rand/` sao scripts diagnosticos antigos (com credenciais fixas) e nao
-devem ser considerados validacao. A validacao real e feita pelos comandos
-acima, contra a API rodando e com imagens reais de `images/alimentos/`.
+Os arquivos em `test/` sao scripts diagnosticos antigos (com caminhos e
+credenciais fixas) e nao fazem parte da suite automatizada (veja a secao 11).
 
 Para evitar o aviso de rate limit do HuggingFace no primeiro download do
 modelo, exporte um token (opcional): `export HF_TOKEN=<seu-token>`.
@@ -616,6 +614,27 @@ modelo, exporte um token (opcional): `export HF_TOKEN=<seu-token>`.
   clientes web (browser) consumirem a API de outra origem.
 - Para o firmware acessar a API, use `http://<IP-da-maquina>:8000` em `BASE_URL`
   e verifique se a porta 8000 esta liberada no firewall local.
+
+### 11. Testes automatizados
+
+A suite fica em `tests/` (pytest + `TestClient` do FastAPI). Ela usa um banco
+**isolado** `Smart-Balance-test` no mesmo PostgreSQL do `.env` (criado
+automaticamente; o nome precisa terminar em `test`), recriado do zero a cada
+execucao e semeado apenas com os dados de referencia do `smart-balance.sql`
+(alimentos, nutrientes, alergenos). O banco de desenvolvimento nao e tocado.
+
+```bash
+uv pip install --python .venv/bin/python -r requirements-dev.txt   # instala o pytest
+docker compose -f compose.dev.yml up -d                            # PostgreSQL local
+.venv/bin/python -m pytest                                         # suite completa (inclui SigLIP real)
+.venv/bin/python -m pytest -m "not siglip"                         # sem o modelo (rapido)
+.venv/bin/python tests/perf_endpoints.py --reps 20                 # tempos por endpoint
+```
+
+Os testes SigLIP usam o modelo do cache local (`HF_HUB_OFFLINE=1`) e sao
+pulados automaticamente se ele nao estiver baixado. Outro nome de banco pode
+ser usado com `TEST_POSTGRES_DB=<nome>_test`. O resultado da ultima auditoria
+esta em `RELATORIO_AUDITORIA_ENDPOINTS.md`.
 
 ## Observacoes Importantes
 
