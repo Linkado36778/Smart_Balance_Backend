@@ -682,9 +682,71 @@ def _get_model():
     return processor, model
 
 
+# ---------------------------------------------------------------------------
+# Selecao manual (balanca): abaixo deste valor de confianca o cliente deve
+# pedir ao usuario que escolha entre os candidatos. NAO e um limiar de
+# classificacao: o ranking do SigLIP nao muda, apenas e informado ao cliente.
+# ---------------------------------------------------------------------------
+
+MANUAL_SELECTION_THRESHOLD = 0.70
+# Quantos alimentos candidatos (melhores do ranking) sao devolvidos.
+CANDIDATES_COUNT = 5
+
+
+def requires_manual_selection(confidence) -> bool:
+    """True quando a confianca e estritamente menor que o limiar (ou invalida).
+
+    A confianca vem do softmax em float32; a comparacao e feita na mesma
+    precisao para que 70% (float32 0.699999988) nao seja tratado como 69,99%.
+    """
+    try:
+        value = float(confidence)
+    except (TypeError, ValueError):
+        return True
+    if value != value or value < 0.0 or value > 1.0:  # NaN ou fora de [0, 1]
+        return True
+    as_f32 = torch.tensor(value, dtype=torch.float32).item()
+    threshold_f32 = torch.tensor(MANUAL_SELECTION_THRESHOLD, dtype=torch.float32).item()
+    return as_f32 < threshold_f32
+
+
+def build_recognition_candidates(db: Session, ranked_predictions, weight: float | None = None):
+    """Converte o ranking do SigLIP em alimentos do banco, na mesma ordem.
+
+    Rotulos sem alimento cadastrado sao ignorados (nenhum id inexistente e
+    devolvido) e um mesmo alimento aparece uma unica vez (o de maior score).
+    """
+    candidates = []
+    seen_ids = set()
+
+    for prediction in ranked_predictions:
+        food = db.query(Food).filter(Food.name == prediction["label"]).first()
+        if food is None or food.id in seen_ids:
+            continue
+        seen_ids.add(food.id)
+
+        candidate = {
+            "food_id": food.id,
+            "food_name": food.name,
+            "category_id": food.category_id,
+            "brand_id": food.brand_id,
+            "confidence": float(prediction["confidence"]),
+        }
+        if weight is not None:
+            candidate["nutrients"] = get_food_nutrients_by_weight(db, food.id, weight)["nutrients"]
+        candidates.append(candidate)
+
+        if len(candidates) >= CANDIDATES_COUNT:
+            break
+
+    return candidates
+
+
 def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int = 3, weight: float | None = None):
     image_bytes = _normalize_image_bytes(image_data)
     top_k = min(top_k, len(LABELS))
+    # O ranking e calculado uma vez para predictions (top_k) e candidatos.
+    ranked_k = min(max(top_k, CANDIDATES_COUNT), len(LABELS))
 
     try:
         image = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -709,12 +771,12 @@ def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int 
         outputs = model(**inputs)
         logits = outputs.logits_per_image[0]
         probs = torch.softmax(logits, dim=-1)
-        top_probs, top_idx = torch.topk(probs, k=top_k)
+        top_probs, top_idx = torch.topk(probs, k=ranked_k)
 
     top_confidences = top_probs.detach().cpu().tolist()
     top_indices = top_idx.detach().cpu().tolist()
 
-    predictions = [
+    ranked = [
         {
             "label": LABELS[int(index)]["db_name"],
             "model_label": LABELS[int(index)]["model_label"],
@@ -722,6 +784,7 @@ def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int 
         }
         for prob, index in zip(top_confidences, top_indices)
     ]
+    predictions = ranked[:top_k]
 
     recognized_food = recognize_food_from_database(db, predictions[0]["label"])
 
@@ -733,7 +796,11 @@ def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int 
         "language": LABEL_LANGUAGE,
         "recognized_food": recognized_food_weight if weight is not None else recognized_food,
         "confidence": predictions[0]["confidence"],
-        "predictions": predictions
+        "predictions": predictions,
+        # Selecao manual na balanca (contrato aditivo; campos acima inalterados).
+        "confidence_threshold": MANUAL_SELECTION_THRESHOLD,
+        "manual_selection_required": requires_manual_selection(predictions[0]["confidence"]),
+        "candidates": build_recognition_candidates(db, ranked, weight),
     }
 
 

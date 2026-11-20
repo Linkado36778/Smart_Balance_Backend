@@ -600,6 +600,20 @@ a primeira chamada classifica a imagem inteira (`"first_image": true`) e as
 seguintes comparam com a anterior e classificam apenas a regiao alterada
 (`"changed": true`, com `bbox`). Para reiniciar o fluxo, basta reiniciar a API.
 
+Em cada `items[i].recognized_food` a resposta traz, alem de `confidence`
+(softmax do SigLIP, de 0 a 1) e `predictions` (3 melhores rotulos):
+
+- `confidence_threshold`: `0.7`;
+- `manual_selection_required`: `true` quando `confidence < 0.7` (comparacao em
+  float32, a precisao do softmax; 70% exato nao exige selecao);
+- `candidates`: ate 5 alimentos do banco, do maior para o menor score, sem
+  repeticao e sem ids inexistentes, cada um com `food_id`, `food_name`,
+  `category_id`, `brand_id`, `confidence` e, na rota `/weight`, `nutrients`
+  ja escalados ao peso. O primeiro candidato e o proprio `recognized_food`.
+
+A balanca usa `candidates` para o usuario escolher o alimento quando a
+selecao manual e exigida. O ranking e os rotulos do SigLIP nao mudam.
+
 Os arquivos em `test/` sao scripts diagnosticos antigos (com caminhos e
 credenciais fixas) e nao fazem parte da suite automatizada (veja a secao 11).
 
