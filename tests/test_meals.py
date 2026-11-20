@@ -68,6 +68,33 @@ class TestCreateMeal:
         assert client.post("/meals", json={}).status_code == 422
         assert db.query(Meal).filter_by(user_id=user["id"]).count() == 0
 
+    def test_repeated_food_ids_are_associated_once(self, client, make_user, db):
+        """Mesmo alimento pesado duas vezes na balanca: antes gerava 409 (IntegrityError em Meal_Food)."""
+        user = make_user()
+        response = client.post("/meals", json=meal_payload(user["id"], list_foods_ids=[1, 3, 1]))
+        assert response.status_code == 200, response.text
+        meal_id = response.json()["id"]
+        assert sorted(a.food_id for a in db.query(MealFoodAssociation).filter_by(meal_id=meal_id)) == [1, 3]
+        assert abs(response.json()["calories"] - expected_calories(db, [1, 3])) < 1e-6
+
+    def test_firmware_payload_contract(self, client, make_user, db):
+        """Corpo exatamente como o firmware LVGL monta (meal_registration_build_json)."""
+        user = make_user()
+        body = {
+            "name": "Refeição",
+            "user_id": user["id"],
+            "consumed_at": "2026-11-20 12:30:05",
+            "calories": 312,
+            "weight_g": 250,
+            "list_foods_ids": [1, 3],
+            "saved_meal": True,
+        }
+        response = client.post("/meals", json=body)
+        assert response.status_code == 200, response.text
+        row = db.get(Meal, response.json()["id"])
+        assert row.name == "Refeição" and row.weight_g == 250
+        assert row.consumed_at == datetime(2026, 11, 20, 12, 30, 5)
+
 
 class TestListMeals:
     def test_list_with_foods(self, client, make_user):
@@ -98,6 +125,14 @@ class TestUpdateMeal:
         assert row.name == "Jantar" and row.weight_g == 300
         # calorias recalculadas para os novos alimentos (antes eram zeradas pelo valor default do body)
         assert row.calories > 0 and abs(row.calories - expected_calories(db, [6])) < 1e-6
+        assert [a.food_id for a in db.query(MealFoodAssociation).filter_by(meal_id=meal_id)] == [6]
+
+    def test_repeated_food_ids_are_associated_once(self, client, make_user, db):
+        user = make_user()
+        meal_id = client.post("/meals", json=meal_payload(user["id"])).json()["id"]
+        response = client.patch(f"/meals/{meal_id}/{user['id']}", json=meal_payload(user["id"], list_foods_ids=[6, 6]))
+        assert response.status_code == 200, response.text
+        db.expunge_all()
         assert [a.food_id for a in db.query(MealFoodAssociation).filter_by(meal_id=meal_id)] == [6]
 
     def test_other_user_cannot_update(self, client, make_user):

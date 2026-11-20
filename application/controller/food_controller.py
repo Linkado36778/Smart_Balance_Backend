@@ -680,7 +680,10 @@ def create_meal(body: PostCreateMealBodyRequest, db: DbDependency):
 
     foods: List[Food] = []
 
-    for food_id in body.list_foods_ids:
+    # Meal_Food tem chave (meal_id, food_id): o mesmo alimento so pode ser
+    # associado uma vez. A balanca envia o ID repetido quando o mesmo alimento
+    # e pesado duas vezes; sem esta deduplicacao a refeicao inteira falhava.
+    for food_id in dict.fromkeys(body.list_foods_ids):
         food = db.query(Food).filter(Food.id == food_id).first()
 
         if food is None:
@@ -731,7 +734,8 @@ def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db:
 
     foods: List[Food] = []
 
-    for food_id in meal.list_foods_ids:
+    # Mesma regra do POST /meals: cada alimento uma vez em Meal_Food.
+    for food_id in dict.fromkeys(meal.list_foods_ids):
         food = db.query(Food).filter(Food.id == food_id).first()
     
         if food is None:
