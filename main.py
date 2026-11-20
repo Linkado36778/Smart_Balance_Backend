@@ -8,6 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+import logging
 
 from application.controller import user_controller, food_controller, auth_controller, vision_recognition_controller
 from application.controller import food_recognition
@@ -86,6 +88,28 @@ async def return_exception_handler(request: Request, exc: ReturnException):
         response_body["data"] = exc.data
 
     return JSONResponse(status_code=exc.status_code, content=response_body)
+
+
+logger = logging.getLogger("smart_balance")
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    """Converts database integrity violations (FK/PK/unique) into 409 instead of an unhandled 500.
+
+    The request session is rolled back by get_db when it is closed.
+    """
+    logger.warning("Integrity error on %s %s: %s", request.method, request.url.path, exc.orig)
+    return JSONResponse(
+        status_code=409,
+        content={
+            "success": False,
+            "message": "Operation violates a database constraint (referenced record missing, duplicated or still in use).",
+            "data": None,
+            "status_code": 409,
+            "url": str(request.url),
+        },
+    )
 
 
 #region Docs

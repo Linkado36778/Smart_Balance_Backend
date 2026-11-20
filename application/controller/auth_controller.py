@@ -69,6 +69,9 @@ def auth_user(body: PostAuthUserBodyRequest, db: DbDependency):
             success=False,
         )
 
+    except ReturnException:
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -119,6 +122,9 @@ def auth_nutricionist(body: PostAuthUserBodyRequest, db: DbDependency):
             success=False,
         )
 
+    except ReturnException:
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(

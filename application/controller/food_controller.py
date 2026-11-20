@@ -7,6 +7,8 @@ from unicodedata import normalize
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
@@ -57,10 +59,10 @@ class PostCreateMealBodyRequest(BaseModel):
     list_foods_ids: List[int] = Field(default_factory=list)
     saved_meal: bool = False
 
-    @field_validator("consumed_at")
+    @field_validator("consumed_at", mode="before")
     def parse_consumed_at(cls, value):
         """Ensure consumed_at is a datetime object."""
-        if isinstance(value, str):
+        if isinstance(value, str) and len(value) <= 5 and ":" in value:
             try:
                 return datetime.strptime(value, "%H:%M")
             except ValueError:
@@ -68,6 +70,15 @@ class PostCreateMealBodyRequest(BaseModel):
         return value
 
 #region Helpers
+
+def calculate_meal_calories(db: Session, foods: List["Food"]) -> float:
+    """Sum the calories of the given foods using their per-100g nutrient amounts."""
+    total_calories = 0.0
+    for food in foods:
+        for nutrient, nutrient_amount in get_food_nutrients(db, food.id):
+            amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
+            total_calories += amount_per_100g * (nutrient.calories_per_unit or 0.0)
+    return total_calories
 
 def normalize_text(value: str) -> str:
     """Normalize text for consistent comparisons."""
@@ -210,10 +221,10 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
     allergic_food_ids = {
         food_id
         for (food_id,) in (
-            db.query(CreatedFoodAllergenAssociation.created_food_id)
+            db.query(AllergenFoodAssociation.food_id)
             .join(
                 UserAllergenAssociation,
-                UserAllergenAssociation.allergen_id == CreatedFoodAllergenAssociation.allergen_id,
+                UserAllergenAssociation.allergen_id == AllergenFoodAssociation.allergen_id,
             )
             .filter(UserAllergenAssociation.user_id == user_id)
             .all()
@@ -250,14 +261,19 @@ def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
 
 
 @router.get("/foods/{food_id}")
-def list_created_foods(db: DbDependency, user_id: int):
-    """Lista alimentos criados pelo usuário e informa se o usuario e alergico a cada um."""
+def list_created_foods(food_id: int, db: DbDependency, user_id: int):
+    """Retorna um alimento criado pelo usuário e informa se o usuario e alergico a ele."""
 
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    created_food = db.query(CreatedFood).filter(CreatedFood.user_id == user_id).first()
+    created_food = (
+        db.query(CreatedFood)
+        .filter(CreatedFood.id == food_id)
+        .filter(CreatedFood.user_id == user_id)
+        .first()
+    )
     if created_food is None:
         raise HTTPException(status_code=404, detail="Created food not found")
 
@@ -304,6 +320,9 @@ def list_created_foods(db: DbDependency, user_id: int):
 def create_food(body: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
     """Cadastra um novo alimento com seus nutrientes."""
     try:
+        if db.query(User).filter(User.id == user_id).first() is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
         existing = db.query(CreatedFood).filter(CreatedFood.name.ilike(body.name)).first()
 
         if existing is not None:
@@ -361,6 +380,9 @@ def create_food(body: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int
             success=True
         )
 
+    except (HTTPException, IntegrityError):
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -437,6 +459,9 @@ def update_food(food_id: int, food: PostCreatedFoodBodyRequest, db: DbDependency
             success=True
         )
 
+    except (HTTPException, IntegrityError):
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -475,6 +500,9 @@ def delete_food(food_id: int, db: DbDependency, user_id: int):
             success=True
         )
 
+    except (HTTPException, IntegrityError):
+        db.rollback()
+        raise
     except Exception as err:
         db.rollback()
         raise ReturnException(
@@ -534,7 +562,7 @@ def delete_brand(brand_id: int, db: DbDependency):
 )
 def create_brand(body: PostCreateBrandBodyRequest, db: DbDependency):
     """Cadastra uma nova marca."""
-    existing = db.query(Brand).filter(Brand.name.ilike(f"%{body.name}%")).first()
+    existing = db.query(Brand).filter(func.lower(Brand.name) == body.name.strip().lower()).first()
 
     if existing is not None:
         raise HTTPException(status_code=400, detail="Brand already exists")
@@ -650,8 +678,6 @@ def create_meal(body: PostCreateMealBodyRequest, db: DbDependency):
     if user is None:
         raise HTTPException(status_code=400, detail=f"User_id: {body.user_id} dont exist")
 
-    total_calories = 0.0
-    total_nutrients: Dict[str, float] = {}
     foods: List[Food] = []
 
     for food_id in body.list_foods_ids:
@@ -662,13 +688,7 @@ def create_meal(body: PostCreateMealBodyRequest, db: DbDependency):
         
         foods.append(food)
 
-        item_calories = 0.0
-        for nutrient, nutrient_amount in get_food_nutrients(db, food.id):
-            amount_per_100g = parse_nutrient_amount(nutrient_amount, nutrient)
-            total_nutrients[nutrient.name] = total_nutrients.get(nutrient.name, 0.0) + amount_per_100g
-            item_calories += amount_per_100g * (nutrient.calories_per_unit or 0.0)
-
-        total_calories += item_calories
+    total_calories = calculate_meal_calories(db, foods)
 
     new_meal = Meal(
         name = body.name,
@@ -707,12 +727,7 @@ def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db:
     if not updated_meal:
         raise HTTPException(status_code=404, detail="Meal not found")
 
-    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).all()
-    for assoc in deleted_associations:
-        db.delete(assoc)
-
-    for field, value in meal.model_dump().items():
-        setattr(updated_meal, field, value)
+    db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).delete()
 
     foods: List[Food] = []
 
@@ -723,6 +738,12 @@ def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db:
             raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
             
         foods.append(food)
+
+    # O dono da refeição vem da rota; o corpo não pode transferi-la para outro usuário.
+    # As calorias são recalculadas da mesma forma que no POST /meals.
+    for field, value in meal.model_dump(exclude={"user_id", "list_foods_ids", "calories"}).items():
+        setattr(updated_meal, field, value)
+    updated_meal.calories = calculate_meal_calories(db, foods)
 
     for new_food in foods:
         association = MealFoodAssociation(
@@ -744,9 +765,7 @@ def delete_meal(meal_id: int, user_id: int, db: DbDependency):
     if not meal_to_delete:
         raise HTTPException(status_code=404, detail="Meal not found")
 
-    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == meal_to_delete.id).all()
-    for assoc in deleted_associations:
-        db.delete(assoc)
+    db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == meal_to_delete.id).delete()
 
     db.delete(meal_to_delete)
     db.commit()
