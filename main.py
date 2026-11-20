@@ -1,17 +1,33 @@
 """Main application entry point for the Smart Balance API."""
 
+from pathlib import Path
+import shutil
+
 from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference, Theme, DocumentDownloadType
+from sqlalchemy import text
 
 from application.controller import user_controller, food_controller, auth_controller, vision_recognition_controller
+from application.controller import food_recognition
 from application.models.return_models import ReturnException
+from shared.database import engine, initialize_database
+import json
+
+class UTF8JSONResponse(JSONResponse):
+    """Custom JSONResponse class that ensures UTF-8 encoding for JSON responses."""
+    def render(self, content) -> bytes:
+        """Renders the content as a JSON byte string with UTF-8 encoding."""
+        return json.dumps(content, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")).encode("utf-8")
+
 
 app = FastAPI(
     docs_url=None,  # Disable default Swagger UI
     redoc_url=None,  # Disable default ReDoc UI
     title="Smart Balance API",
     description="API for user management and food search functionalities in the Smart Balance application.",
+    default_response_class=UTF8JSONResponse
 )
 
 #region Routers
@@ -20,6 +36,40 @@ app.include_router(auth_controller.router)
 app.include_router(user_controller.router)
 app.include_router(food_controller.router)
 app.include_router(vision_recognition_controller.router)
+app.include_router(food_recognition.router)
+
+
+#region Lifecycle
+
+@app.on_event("startup")
+def startup_event():
+    """Initializes database tables and seed data when the API starts."""
+    initialize_database()
+
+BASE_DIR = Path(__file__).resolve().parent
+
+IMAGES_DIR = BASE_DIR / "images"
+QR_CODES_DIR = BASE_DIR / "qr_codes"
+QR_CODES_DIR.mkdir(exist_ok=True)
+
+app.mount(
+    "/images",
+    StaticFiles(directory=IMAGES_DIR),
+    name="images",
+)
+
+app.mount(
+    "/qr_codes",
+    StaticFiles(directory=QR_CODES_DIR),
+    name="qr_codes",
+)
+
+
+@app.on_event("shutdown")
+def cleanup_qr_codes():
+    """Remove temporary QR Code images after a graceful API shutdown."""
+    if QR_CODES_DIR.exists():
+        shutil.rmtree(QR_CODES_DIR)
 
 
 #region Exception
@@ -79,7 +129,29 @@ def read_root():
     """Root endpoint providing basic information about the API."""
     return {
         "message": "API running",
-        "routes": ["/users/create_User", "/users/get_User/{user_id}"]
+        "routes": ["/user", "/user/{user_id}"]
+    }
+
+
+@app.get("/health")
+def health_check():
+    """Checks whether the API and database connection are healthy."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "database": "unavailable",
+                "detail": str(exc),
+            },
+        )
+
+    return {
+        "status": "healthy",
+        "database": "available",
     }
 
 

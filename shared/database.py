@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-SQLALCHEMY_DATABASE_URL = os.getenv("SQLALCHEMY_DATABASE_URL")
+SQLALCHEMY_DATABASE_URL = f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
 
 if not SQLALCHEMY_DATABASE_URL:
     raise RuntimeError("SQLALCHEMY_DATABASE_URL nao foi definida no arquivo .env")
@@ -31,15 +31,13 @@ engine = create_engine(
 SESSEON_LOCAL = sessionmaker(autoflush=False, autocommit=False, bind=engine)
 
 DEFAULT_CATEGORIES = [
+    "Carnes e derivados",
     "Cereais",
-    "Legumes",
-    "Proteinas",
-    "Laticinios",
+    "Frango",
     "Frutas",
-    "Verduras",
-    "Gorduras",
-    "Bebidas",
-    "Outros",
+    "Hortaliças",
+    "Leguminosas",
+    "Ovos",
 ]
 
 DEFAULT_NUTRIENTS = [
@@ -52,7 +50,6 @@ DEFAULT_NUTRIENTS = [
     {"name": "Calcio", "unit": "mg", "calories_per_unit": 0.0},
     {"name": "Ferro", "unit": "mg", "calories_per_unit": 0.0},
     {"name": "Vitamina C", "unit": "mg", "calories_per_unit": 0.0},
-    {"name": "Vitamina D", "unit": "ug", "calories_per_unit": 0.0},
 ]
 
 def get_db():
@@ -79,11 +76,22 @@ def seed_categories():
 
         if engine.dialect.name == "postgresql":
             db.execute(
-                text("SELECT setval(pg_get_serial_sequence('\"Category\"', 'id'), :value, true)"),
+                text(
+                    """
+                    SELECT setval(
+                        pg_get_serial_sequence('"Category"', 'id'),
+                        GREATEST((SELECT COALESCE(MAX(id), 1) FROM "Category"), :value),
+                        true
+                    )
+                    """
+                ),
                 {"value": len(DEFAULT_CATEGORIES)},
             )
 
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -94,21 +102,37 @@ def seed_nutrients():
     try:
         for nutrient_id, nutrient_data in enumerate(DEFAULT_NUTRIENTS, start=1):
             nutrient = db.query(Nutrient).filter(Nutrient.id == nutrient_id).first()
-            print(nutrient_id, nutrient_data)
-            if nutrient is None:
-                db.add(Nutrient(
-                    name = nutrient_data["name"],
-                    unit = nutrient_data["unit"],
-                    calories_per_unit = nutrient_data["calories_per_unit"]
-                ))
+            if nutrient:
+                nutrient.name = nutrient_data["name"]
+                nutrient.unit = nutrient_data["unit"]
+                nutrient.calories_per_unit = nutrient_data["calories_per_unit"]
+            else:
+                nutrient = Nutrient(
+                    name=nutrient_data["name"],
+                    unit=nutrient_data["unit"],
+                    calories_per_unit=nutrient_data["calories_per_unit"],
+                )
+                nutrient.id = nutrient_id
+                db.add(nutrient)
 
         if engine.dialect.name == "postgresql":
             db.execute(
-                text("SELECT setval(pg_get_serial_sequence('\"Nutrient\"', 'id'), :value, true)"),
+                text(
+                    """
+                    SELECT setval(
+                        pg_get_serial_sequence('"Nutrient"', 'id'),
+                        GREATEST((SELECT COALESCE(MAX(id), 1) FROM "Nutrient"), :value),
+                        true
+                    )
+                    """
+                ),
                 {"value": len(DEFAULT_NUTRIENTS)},
             )
 
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
