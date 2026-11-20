@@ -1,0 +1,51 @@
+image,ground_truth,model,language,top1,top1_conf,top2,top2_conf,top3,top3_conf,correct
+beef_steak_01.jpg,bife bovino,CLIP,PT,bife bovino,0.7531102895736694,batata frita,0.04774529114365578,arroz frito,0.02171899750828743,True
+beef_steak_02.jpg,bife bovino,CLIP,PT,bife bovino,0.9461125135421753,frango grelhado,0.005519957281649113,batata frita,0.005491173360496759,True
+beef_steak_03.jpg,bife bovino,CLIP,PT,bife bovino,0.8187344074249268,grão-de-bico,0.009893704205751419,cenoura,0.00948373693972826,True
+beef_steak_04.jpg,bife bovino,CLIP,PT,bife bovino,0.8479881286621094,macarrão,0.00987950712442398,cenoura,0.00831677671521902,True
+beef_steak_05.jpg,bife bovino,CLIP,PT,bife bovino,0.8991370797157288,frango grelhado,0.006561479065567255,couve kale,0.005742388777434826,True
+black_beans_01.webp,feijão preto,CLIP,PT,arroz integral,0.3336464762687683,arroz frito,0.07934311777353287,salada verde,0.06961935013532639,False
+black_beans_02.jpg,feijão preto,CLIP,PT,arroz integral,0.27110961079597473,quinoa,0.16330358386039734,macarrão,0.07178142666816711,False
+black_beans_03.webp,feijão preto,CLIP,PT,arroz integral,0.28665539622306824,macarrão,0.10075265169143677,omelete,0.09024004638195038,False
+black_beans_04.jpg,feijão preto,CLIP,PT,arroz integral,0.35041508078575134,macarrão,0.13635621964931488,arroz branco,0.10317099839448929,False
+black_beans_05.jpg,feijão preto,CLIP,PT,arroz integral,0.3281380236148834,quinoa,0.240176260471344,arroz frito,0.14173899590969086,False
+cherry_tomato_01.webp,tomate cereja,CLIP,PT,tomate cereja,0.3182501196861267,queijo cottage,0.09135321527719498,batata-doce,0.08667975664138794,True
+cherry_tomato_02.jpg,tomate cereja,CLIP,PT,tomate cereja,0.6413033604621887,tomate,0.2403140664100647,macarrão,0.023370571434497833,True
+cherry_tomato_03.jpg,tomate cereja,CLIP,PT,tomate,0.4644240438938141,tomate cereja,0.4561767578125,arroz integral,0.007804469205439091,False
+cherry_tomato_04.webp,tomate cereja,CLIP,PT,tomate cereja,0.6592961549758911,tomate,0.3047768175601959,feijão vermelho,0.0055116466246545315,True
+cherry_tomato_05.webp,tomate cereja,CLIP,PT,tomate cereja,0.5778046250343323,tomate,0.31685787439346313,quinoa,0.007801868952810764,True
+fries_01.webp,batata frita,CLIP,PT,batata frita,0.5895465612411499,arroz frito,0.1205528974533081,purê de batatas,0.10808868706226349,True
+fries_02.jpg,batata frita,CLIP,PT,batata frita,0.5722082853317261,arroz frito,0.12506207823753357,purê de batatas,0.08136408030986786,True
+fries_03.jpg,batata frita,CLIP,PT,batata frita,0.3824802041053772,arroz frito,0.3422453999519348,purê de batatas,0.08181273937225342,True
+fries_04.webp,batata frita,CLIP,PT,massa penne,0.45210686326026917,batata frita,0.135545551776886,macarrão,0.12183479219675064,False
+fries_05.webp,batata frita,CLIP,PT,batata frita,0.36603546142578125,massa penne,0.17834244668483734,arroz frito,0.14865528047084808,True
+grilled_chicken_01.jpg,frango grelhado,CLIP,PT,bife bovino,0.23049123585224152,linguine,0.08739971369504929,frango assado,0.07554586976766586,False
+grilled_chicken_02.jpg,frango grelhado,CLIP,PT,batata frita,0.27029937505722046,bife bovino,0.14344297349452972,frango frito,0.13272784650325775,False
+grilled_chicken_03.jpg,frango grelhado,CLIP,PT,arroz frito,0.3993678092956543,batata frita,0.21021856367588043,frango frito,0.06769852340221405,False
+grilled_chicken_04.jpg,frango grelhado,CLIP,PT,bife bovino,0.2834126055240631,batata frita,0.16797663271427155,arroz frito,0.11701925098896027,False
+grilled_chicken_05.jpg,frango grelhado,CLIP,PT,macarrão,0.13756218552589417,bife bovino,0.10341007262468338,batata-doce,0.09058083593845367,False
+mashed_potatoes_01.jpg,purê de batatas,CLIP,PT,fettuccine,0.2052328735589981,massa penne,0.1408129632472992,linguine,0.13585597276687622,False
+mashed_potatoes_02.jpg,purê de batatas,CLIP,PT,salada verde,0.17022280395030975,queijo cheddar,0.1281917691230774,arroz branco,0.10596907138824463,False
+mashed_potatoes_03.jpg,purê de batatas,CLIP,PT,arroz branco,0.2104855626821518,queijo cheddar,0.12872713804244995,queijo muçarela,0.06815515458583832,False
+mashed_potatoes_04.jpg,purê de batatas,CLIP,PT,queijo muçarela,0.13262632489204407,macarrão,0.12722113728523254,fettuccine,0.12027423828840256,False
+mashed_potatoes_05.webp,purê de batatas,CLIP,PT,salada verde,0.6066285967826843,queijo cottage,0.07348271459341049,batata-doce,0.046024493873119354,False
+ramen_noodles_01.jpg,lámen,CLIP,PT,linguine,0.3854186236858368,fettuccine,0.28637564182281494,arroz branco,0.06525859236717224,False
+ramen_noodles_02.jpg,lámen,CLIP,PT,linguine,0.329543799161911,arroz integral,0.12906450033187866,fettuccine,0.11437229067087173,False
+ramen_noodles_03.jpg,lámen,CLIP,PT,fettuccine,0.2585752606391907,linguine,0.18376342952251434,massa penne,0.14302533864974976,False
+ramen_noodles_04.jpg,lámen,CLIP,PT,linguine,0.657665491104126,fettuccine,0.2522742748260498,massa penne,0.02779778465628624,False
+ramen_noodles_05.jpg,lámen,CLIP,PT,linguine,0.5149531960487366,fettuccine,0.3928811550140381,massa penne,0.05510557442903519,False
+scrambled_eggs_01.jpg,ovos mexidos,CLIP,PT,omelete,0.667756974697113,arroz branco,0.06790126860141754,arroz integral,0.04532734304666519,False
+scrambled_eggs_02.jpg,ovos mexidos,CLIP,PT,omelete,0.29206550121307373,queijo cheddar,0.27125486731529236,purê de batatas,0.07597767561674118,False
+scrambled_eggs_03.webp,ovos mexidos,CLIP,PT,arroz frito,0.26052454113960266,queijo cheddar,0.19124801456928253,arroz integral,0.10872030258178711,False
+scrambled_eggs_04.jpg,ovos mexidos,CLIP,PT,omelete,0.6817862391471863,queijo muçarela,0.04478473216295242,batata-doce,0.03472445160150528,False
+scrambled_eggs_05.webp,ovos mexidos,CLIP,PT,omelete,0.423198401927948,batata frita,0.11615946888923645,queijo cheddar,0.11307196319103241,False
+spinach_01.jpg,espinafre,CLIP,PT,salada verde,0.7914116382598877,linguine,0.05968816950917244,quinoa,0.04483972489833832,False
+spinach_02.jpg,espinafre,CLIP,PT,salada verde,0.8048600554466248,arroz integral,0.03785274550318718,linguine,0.027279604226350784,False
+spinach_03.webp,espinafre,CLIP,PT,salada verde,0.9092404842376709,linguine,0.02223128266632557,quinoa,0.016579506918787956,False
+spinach_04.jpg,espinafre,CLIP,PT,salada verde,0.9496839642524719,linguine,0.017404688522219658,massa penne,0.008268507197499275,False
+spinach_05.jpg,espinafre,CLIP,PT,salada verde,0.9635633230209351,arroz integral,0.008452293463051319,linguine,0.005037324037402868,False
+white_rice_01.webp,arroz branco,CLIP,PT,arroz branco,0.5413132905960083,arroz integral,0.43580615520477295,arroz frito,0.015180130489170551,True
+white_rice_02.jpg,arroz branco,CLIP,PT,arroz integral,0.6496012806892395,arroz branco,0.24562440812587738,arroz frito,0.03987332060933113,False
+white_rice_03.jpg,arroz branco,CLIP,PT,arroz branco,0.5748579502105713,arroz integral,0.32537853717803955,quinoa,0.08845527470111847,True
+white_rice_04.jpg,arroz branco,CLIP,PT,arroz integral,0.3454744815826416,arroz branco,0.23383599519729614,salada verde,0.12937390804290771,False
+white_rice_05.jpg,arroz branco,CLIP,PT,arroz integral,0.4706293046474457,arroz branco,0.46164625883102417,arroz frito,0.03286009281873703,False

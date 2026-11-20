@@ -1,15 +1,16 @@
 """Food search and meal management endpoints."""
 
 from datetime import datetime
+import os
 from typing import Annotated, Any, Dict, List, Optional, Union
 from unicodedata import normalize
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from shared.database import get_db
-from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation
+from application.models.application_models import CreatedFood, Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, CreatedFoodNutrientAssociation, CreatedFoodAllergenAssociation
 from application.models.return_models import ReturnModel, ReturnException
 
 
@@ -17,6 +18,7 @@ from application.models.return_models import ReturnModel, ReturnException
 
 router = APIRouter(tags=["Food"])
 DbDependency = Annotated[Session, Depends(get_db)]
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")  # Default to localhost if not set
 
 #region Schemas
 
@@ -25,7 +27,8 @@ class NutrientAmount(BaseModel):
     id: int
     amount: float
 
-class PostCreateFoodBodyRequest(BaseModel):
+
+class PostCreatedFoodBodyRequest(BaseModel):
     """Base model for food creation."""
 
     model_config = ConfigDict(extra="forbid")
@@ -52,6 +55,17 @@ class PostCreateMealBodyRequest(BaseModel):
     calories: float = 0.0
     weight_g: float = 0.0
     list_foods_ids: List[int] = Field(default_factory=list)
+    saved_meal: bool = False
+
+    @field_validator("consumed_at")
+    def parse_consumed_at(cls, value):
+        """Ensure consumed_at is a datetime object."""
+        if isinstance(value, str):
+            try:
+                return datetime.strptime(value, "%H:%M")
+            except ValueError:
+                raise ValueError("consumed_at must be in H:M format")
+        return value
 
 #region Helpers
 
@@ -103,6 +117,44 @@ def parse_nutrient_amount(value: Any, nutrient: Nutrient) -> float:
 
     return 0.0
 
+
+def get_food_nutrients_by_weight(db: Session, food_id: int, weight: float):
+    """Fetches the nutrients and their amounts for a given food item, adjusted for a specific weight."""
+    food_nutrient = FoodNutrientAssociation.__table__
+
+    # join Nutrient with the association table and return (Nutrient, amount)
+    nutrients_with_amounts = (
+        db.query(
+            Nutrient,
+            food_nutrient.c.amount,
+        )
+        .join(
+            food_nutrient,
+            Nutrient.id == food_nutrient.c.nutrient_id,
+        )
+        .filter(food_nutrient.c.food_id == food_id)
+        .all()
+    )
+
+    # Adjust amounts based on the provided weight
+    adjusted_nutrients = []
+    for nutrient, amount in nutrients_with_amounts:
+        adjusted_amount = (amount * weight) / 100.0  # Assuming the original amount is per 100g
+        adjusted_nutrients.append((nutrient, adjusted_amount))
+
+    return {
+        "nutrients": [
+            {
+                "nutrient_id": nutrient.id,
+                "name": nutrient.name,
+                "amount": adjusted_amount,
+                "unit": nutrient.unit
+            }
+            for nutrient, adjusted_amount in adjusted_nutrients
+        ]
+    }
+
+
 def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
     """Fetches the nutrients and their amounts for a given food item from the association table."""
     food_nutrient = FoodNutrientAssociation.__table__
@@ -121,52 +173,146 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
         .all()
     )
 
+# Função integrada no list_foods para buscar os alérgenos do usuário para um alimento específico
+# def get_user_allergens_by_food(user_id: int, food_id: int, db: DbDependency):
+#     """Retrieve a user's allergens by their ID and a specific food ID."""
+#     db_user = db.query(User).filter(User.id == user_id).first()
+#     if db_user is None:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     # Assuming you have a relationship set up between User and Allergen
+#     allergens = (
+#     db.query(Allergen)
+#     .join(UserAllergenAssociation, UserAllergenAssociation.allergen_id == Allergen.id)
+#     .join(AllergenFoodAssociation, AllergenFoodAssociation.allergen_id == Allergen.id)
+#     .filter(UserAllergenAssociation.user_id == user_id)
+#     .filter(AllergenFoodAssociation.food_id == food_id)
+#     .all()
+# )
+#     return allergens
 
 #region Foods
 
-@router.get(
-    "/foods",
-    responses={
-        200: {"model": ReturnModel[Food], "description": "Foods getted successfully"},
-    }
-)
-def list_foods(db: DbDependency, query_name: Optional[str] = None, query_food_id: Optional[int] = None):
-    """Lista todos os alimentos. Filtra por nome (parcial) ou por food_id."""
+@router.get("/foods")
+def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
+    """Lista alimentos e informa se o usuario e alergico a cada um."""
+
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
     query = db.query(Food)
+    if name:
+        query = query.filter(Food.name.ilike(f"%{name}%"))
 
-    if query_food_id is not None:
-        food = query.filter(Food.id == query_food_id).first()
-        if food is None:
-            raise HTTPException(status_code=404, detail="Food not found")
-        return food
+    foods = query.order_by(Food.id).all()
 
-    if query_name:
-        query = query.filter(Food.name.ilike(f"%{query_name}%"))
-
-    return ReturnModel(
-        message="Foods getted successfully",
-        data=query.order_by(Food.id).all(),
-        success=True
-    )
-
-
-@router.post(
-    "/foods",
-    responses={
-        200: {"model": ReturnModel, "description": "Foods created successfully"},
+    allergic_food_ids = {
+        food_id
+        for (food_id,) in (
+            db.query(CreatedFoodAllergenAssociation.created_food_id)
+            .join(
+                UserAllergenAssociation,
+                UserAllergenAssociation.allergen_id == CreatedFoodAllergenAssociation.allergen_id,
+            )
+            .filter(UserAllergenAssociation.user_id == user_id)
+            .all()
+        )
     }
-)
-def create_food(body: PostCreateFoodBodyRequest, db: DbDependency):
+
+    return [
+        {
+            "id": food.id,
+            "name": food.name,
+            "category_id": food.category_id,
+            "brand_id": food.brand_id,
+            "nutrients": [
+                {
+                    "id": nutrient.id,
+                    "name": nutrient.name,
+                    "amount": assoc.amount,
+                    "unit": nutrient.unit,
+                    "calories_per_unit": nutrient.calories_per_unit,
+                }
+                for nutrient, assoc in (
+                    db.query(Nutrient, FoodNutrientAssociation)
+                    .join(FoodNutrientAssociation, FoodNutrientAssociation.nutrient_id == Nutrient.id)
+                    .filter(FoodNutrientAssociation.food_id == food.id)
+                    .all()
+                )
+            ],
+            "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
+            "user_allergic": food.id in allergic_food_ids,
+            "description": food.description
+        }
+        for food in foods
+    ]
+
+
+@router.get("/foods/{food_id}")
+def list_created_foods(db: DbDependency, user_id: int):
+    """Lista alimentos criados pelo usuário e informa se o usuario e alergico a cada um."""
+
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    created_food = db.query(CreatedFood).filter(CreatedFood.user_id == user_id).first()
+    if created_food is None:
+        raise HTTPException(status_code=404, detail="Created food not found")
+
+    allergic_food_ids = {
+        food_id
+        for (food_id,) in (
+            db.query(CreatedFoodAllergenAssociation.created_food_id)
+            .join(
+                UserAllergenAssociation,
+                UserAllergenAssociation.allergen_id == CreatedFoodAllergenAssociation.allergen_id,
+            )
+            .filter(UserAllergenAssociation.user_id == user_id)
+            .all()
+        )
+    }
+
+    return {
+        "id": created_food.id,
+        "name": created_food.name,
+        "category_id": created_food.category_id,
+        "brand_id": created_food.brand_id,
+        "nutrients": [
+            {
+                "id": nutrient.id,
+                "name": nutrient.name,
+                "amount": assoc.amount,
+                "unit": nutrient.unit,
+                "calories_per_unit": nutrient.calories_per_unit,
+            }
+            for nutrient, assoc in (
+                db.query(Nutrient, CreatedFoodNutrientAssociation)
+                .join(CreatedFoodNutrientAssociation, CreatedFoodNutrientAssociation.nutrient_id == Nutrient.id)
+                .filter(CreatedFoodNutrientAssociation.created_food_id == created_food.id)
+                .all()
+            )
+        ],
+        "image": f"{BASE_URL}/images/alimentos/{created_food.image_url}" if created_food.image_url else None,
+        "user_allergic": created_food.id in allergic_food_ids,
+        "description": created_food.description
+    }
+
+
+@router.post("/foods")
+def create_food(body: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
     """Cadastra um novo alimento com seus nutrientes."""
     try:
-        existing = db.query(Food).filter(Food.name.ilike(body.name)).first()
+        existing = db.query(CreatedFood).filter(CreatedFood.name.ilike(body.name)).first()
 
         if existing is not None:
             raise HTTPException(status_code=400, detail="Food already exists")
 
         # Create food with only column fields
-        new_food = Food(
+        new_food = CreatedFood(
             name=body.name,
+            user_id=user_id,
             category_id=body.category_id,
             brand_id=body.brand_id,
         )
@@ -183,9 +329,9 @@ def create_food(body: PostCreateFoodBodyRequest, db: DbDependency):
                     detail=f"Allergen with id '{allergen_id}' not found",
                 )
 
-            assoc = AllergenFoodAssociation(
+            assoc = CreatedFoodAllergenAssociation(
                 allergen_id=allergen.id,
-                food_id=new_food.id,
+                created_food_id=new_food.id,
             )
             db.add(assoc)
 
@@ -199,8 +345,8 @@ def create_food(body: PostCreateFoodBodyRequest, db: DbDependency):
                     detail=f"Nutrient '{nutrient_item.id}' not found",
                 )
 
-            assoc = FoodNutrientAssociation(
-                food_id=new_food.id,
+            assoc = CreatedFoodNutrientAssociation(
+                created_food_id=new_food.id,
                 nutrient_id=nutrient.id,
                 amount=nutrient_item.amount,
             )
@@ -212,6 +358,120 @@ def create_food(body: PostCreateFoodBodyRequest, db: DbDependency):
         return ReturnModel(
             message="Food created successfully",
             data=None,
+            success=True
+        )
+
+    except Exception as err:
+        db.rollback()
+        raise ReturnException(
+            message=str(err),
+            success=False,
+        ) from err
+
+
+@router.patch("/foods/{food_id}")
+def update_food(food_id: int, food: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
+    """Atualiza um alimento existente com seus nutrientes."""
+    try:
+        existing_food = db.query(CreatedFood).filter(CreatedFood.id == food_id).first()
+
+        if existing_food is None:
+            raise HTTPException(status_code=404, detail="Food not found")
+
+        if existing_food.user_id != user_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to update this food")
+
+        # Update food fields
+        existing_food.name = food.name
+        existing_food.category_id = food.category_id
+        existing_food.brand_id = food.brand_id
+
+        # Clear existing associations
+        db.query(CreatedFoodNutrientAssociation).filter(
+            CreatedFoodNutrientAssociation.created_food_id == food_id
+        ).delete()
+
+        db.query(CreatedFoodAllergenAssociation).filter(
+            CreatedFoodAllergenAssociation.created_food_id == food_id
+        ).delete()
+
+        # Create new associations for allergens
+        for allergen_id in food.allergen_ids:
+            allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
+
+            if allergen is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Allergen with id '{allergen_id}' not found",
+                )
+
+            assoc = CreatedFoodAllergenAssociation(
+                allergen_id=allergen.id,
+                created_food_id=existing_food.id,
+            )
+            db.add(assoc)
+
+        # Create new associations for nutrients
+        for nutrient_item in food.nutrients:
+            nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
+
+            if nutrient is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Nutrient '{nutrient_item.id}' not found",
+                )
+
+            assoc = CreatedFoodNutrientAssociation(
+                created_food_id=existing_food.id,
+                nutrient_id=nutrient.id,
+                amount=nutrient_item.amount,
+            )
+            db.add(assoc)
+
+        db.commit()
+        db.refresh(existing_food)
+
+        return ReturnModel(
+            message="Food updated successfully",
+            data=existing_food,
+            success=True
+        )
+
+    except Exception as err:
+        db.rollback()
+        raise ReturnException(
+            message=str(err),
+            success=False,
+        ) from err
+
+
+@router.delete("/foods/{food_id}")
+def delete_food(food_id: int, db: DbDependency, user_id: int):
+    """Deleta um alimento existente."""
+    try:
+        existing_food = db.query(CreatedFood).filter(CreatedFood.id == food_id).first()
+
+        if existing_food is None:
+            raise HTTPException(status_code=404, detail="Food not found")
+
+        if existing_food.user_id != user_id:
+            raise HTTPException(status_code=403, detail="You do not have permission to delete this food")
+
+        # Delete associations first
+        db.query(CreatedFoodNutrientAssociation).filter(
+            CreatedFoodNutrientAssociation.created_food_id == food_id
+        ).delete()
+
+        db.query(CreatedFoodAllergenAssociation).filter(
+            CreatedFoodAllergenAssociation.created_food_id == food_id
+        ).delete()
+
+        # Delete the food itself
+        db.delete(existing_food)
+        db.commit()
+
+        return ReturnModel(
+            message="Food deleted successfully",
             success=True
         )
 
@@ -243,6 +503,28 @@ def search_brands(query_brand_name: str, db: DbDependency):
         success=True
     )
 
+@router.patch("/brands/{brand_id}")
+def update_brand(brand_id: int, brand: PostCreateBrandBodyRequest, db: DbDependency):
+    """Atualiza uma marca existente."""
+    existing_brand = db.query(Brand).filter(Brand.id == brand_id).first()
+    if existing_brand is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    existing_brand.name = brand.name
+    db.commit()
+    db.refresh(existing_brand)
+    return existing_brand
+
+@router.delete("/brands/{brand_id}")
+def delete_brand(brand_id: int, db: DbDependency):
+    """Deleta uma marca existente."""
+    existing_brand = db.query(Brand).filter(Brand.id == brand_id).first()
+    if existing_brand is None:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    db.delete(existing_brand)
+    db.commit()
+    return {"message": "Brand deleted successfully"}
 
 @router.post(
     "/brands",
@@ -303,26 +585,52 @@ def list_nutrients(db: DbDependency):
         success=True
     )
 
+@router.get("/nutrients/{food_id}")
+def list_micro_nutrients(food_id: int, db: DbDependency):
+    """Lista todos os nutrientes disponíveis."""
+    return db.query(FoodNutrientAssociation).join(Nutrient).filter(
+        (Nutrient.name != "Proteinas") &
+        (Nutrient.name != "Carboidratos") &
+        (Nutrient.name != "Gorduras")
+    ).filter(
+        FoodNutrientAssociation.food_id == food_id
+    ).all()
+
 #region Meals
 
-@router.get(
-    "/meals",
-    responses={
-        200: {"model": ReturnModel[Meal], "description": "Meal getted successfully"},
-    }
-)
-def list_user_meals(query_user_id: int, db: DbDependency):
+@router.get("/meals")
+def list_user_meals(user_id: int, db: DbDependency):
     """Busca uma refeição pelo ID do usuário."""
-    meal = db.query(Meal).filter(Meal.user_id == query_user_id).all()
-
-    if meal is None:
+    meals = db.query(Meal).filter(Meal.user_id == user_id).all()
+    if not meals:
         raise HTTPException(status_code=404, detail="Meal not found")
-    
-    return ReturnModel(
-        message="Meal getted successfully",
-        data=meal,
-        success=True
-    )
+    result = []
+    for meal in meals:
+        foods = (
+            db.query(Food)
+            .join(MealFoodAssociation, MealFoodAssociation.food_id == Food.id)
+            .filter(MealFoodAssociation.meal_id == meal.id)
+            .all()
+        )
+        result.append({
+            "id": meal.id,
+            "name": meal.name,
+            "calories": meal.calories,
+            "weight_g": meal.weight_g,
+            "consumed_at": meal.consumed_at,
+            "user_id": meal.user_id,
+            "foods": [
+                {
+                    "id": food.id,
+                    "name": food.name,
+                    "category_id": food.category_id,
+                    "brand_id": food.brand_id,
+                    "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
+                }
+                for food in foods
+            ],
+        })
+    return result
 
 
 @router.post(
@@ -367,22 +675,79 @@ def create_meal(body: PostCreateMealBodyRequest, db: DbDependency):
         user_id = body.user_id,
         consumed_at = body.consumed_at,
         calories = total_calories,
-        weight_g = body.weight_g
+        weight_g = body.weight_g,
+        saved_meal = body.saved_meal
     )
-    db.add(new_meal)
-    db.flush()
 
-    for food in foods:
-        assoc = MealFoodAssociation(
-            meal_id=new_meal.id,
-            food_id=food.id,
-        )
-        db.add(assoc)
+    if new_meal.weight_g <= 0:
+        raise HTTPException(status_code=400, detail="Invalid meal weight")
+
+    if new_meal.saved_meal == True:
+        db.add(new_meal)
+        db.flush()
+
+        for food in foods:
+            assoc = MealFoodAssociation(
+                meal_id=new_meal.id,
+                food_id=food.id,
+            )
+            db.add(assoc)
+
+        db.commit()
+        db.refresh(new_meal)
+        return new_meal
+
+
+@router.patch("/meals/{meal_id}/{user_id}", responses={200: {"model": Meal, "description": "Meal updated successfully"}})
+def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db: DbDependency):
+    """Atualiza uma refeição existente."""
+
+    updated_meal = db.query(Meal).filter(Meal.id == meal_id).filter(Meal.user_id == user_id).first()
+
+    if not updated_meal:
+        raise HTTPException(status_code=404, detail="Meal not found")
+
+    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == updated_meal.id).all()
+    for assoc in deleted_associations:
+        db.delete(assoc)
+
+    for field, value in meal.model_dump().items():
+        setattr(updated_meal, field, value)
+
+    foods: List[Food] = []
+
+    for food_id in meal.list_foods_ids:
+        food = db.query(Food).filter(Food.id == food_id).first()
+    
+        if food is None:
+            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
+            
+        foods.append(food)
+
+    for new_food in foods:
+        association = MealFoodAssociation(
+            meal_id=updated_meal.id,
+            food_id=new_food.id,
+            )
+        db.add(association)
 
     db.commit()
-    db.refresh(new_meal)
-    return ReturnModel(
-        message="Meal created successfully",
-        data=None,
-        success=True
-    )
+    db.refresh(updated_meal)
+    return updated_meal
+
+@router.delete("/meals/{meal_id}/{user_id}", responses={200: {"model": Meal, "description": "Meal deleted successfully"}})
+def delete_meal(meal_id: int, user_id: int, db: DbDependency):
+    """Deleta uma refeição existente."""
+
+    meal_to_delete = db.query(Meal).filter(Meal.id == meal_id).filter(Meal.user_id == user_id).first()
+
+    if not meal_to_delete:
+        raise HTTPException(status_code=404, detail="Meal not found")
+
+    deleted_associations = db.query(MealFoodAssociation).filter(MealFoodAssociation.meal_id == meal_to_delete.id).all()
+    for assoc in deleted_associations:
+        db.delete(assoc)
+
+    db.delete(meal_to_delete)
+    db.commit()
+    return {"message": "Meal deleted successfully"}

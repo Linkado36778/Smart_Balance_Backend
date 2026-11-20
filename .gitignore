@@ -219,3 +219,11 @@ __marimo__/
 
 # static folder
 static
+
+# Database dumps
+backups/
+
+# Artefatos de runtime da API (criados e removidos pela aplicacao)
+tmp/
+output/
+qr_codes/
