@@ -1,6 +1,6 @@
 """Food search and meal management endpoints."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from typing import Annotated, Any, Dict, List, Optional, Union
 from unicodedata import normalize
@@ -64,7 +64,7 @@ class PostCreateMealBodyRequest(BaseModel):
         """Ensure consumed_at is a datetime object."""
         if isinstance(value, str) and len(value) <= 5 and ":" in value:
             try:
-                return datetime.strptime(value, "%H:%M")
+                return datetime.strptime(value, "%H:%M") - timedelta(hours=3)
             except ValueError:
                 raise ValueError("consumed_at must be in H:M format")
         return value
