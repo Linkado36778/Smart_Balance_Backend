@@ -64,7 +64,7 @@ class PostCreateMealBodyRequest(BaseModel):
         """Ensure consumed_at is a datetime object."""
         if isinstance(value, str) and len(value) <= 5 and ":" in value:
             try:
-                return datetime.strptime(value, "%H:%M") - timedelta(hours=3)
+                return datetime.strptime(value, "%H:%M")
             except ValueError:
                 raise ValueError("consumed_at must be in H:M format")
         return value
@@ -723,7 +723,7 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency, user_id: int)
     new_meal = Meal(
         name = meal.name,
         user_id = user.id,
-        consumed_at = meal.consumed_at,
+        consumed_at = meal.consumed_at - timedelta(hours=3),
         calories = total_calories,
         weight_g = total_weight,
         saved_meal = meal.saved_meal
