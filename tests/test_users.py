@@ -134,9 +134,9 @@ class TestDeleteUser:
 
     def test_user_with_meals_is_conflict_not_500(self, client, make_user, db):
         user = make_user()
-        meal = client.post("/meals", json={
-            "name": "Almoco", "user_id": user["id"], "consumed_at": "2026-11-20T12:00:00",
-            "weight_g": 100, "list_foods_ids": [1], "saved_meal": True,
+        meal = client.post("/meals", params={"user_id": user["id"]}, json={
+            "name": "Almoco", "consumed_at": "2026-11-20T12:00:00",
+            "list_foods_ids": [1], "list_foods_weights": [100], "saved_meal": True,
         })
         assert meal.status_code == 200
         response = client.delete(f"/delete_User/{user['id']}")

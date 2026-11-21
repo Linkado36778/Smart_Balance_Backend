@@ -157,6 +157,61 @@ def ensure_nutrient_schema():
                 text('ALTER TABLE "Nutrient" ADD COLUMN calories_per_unit FLOAT DEFAULT 0')
             )
 
+def ensure_meal_food_schema():
+    """Ensures that the Meal_Food table has the food_weight_g column (per-food weight).
+
+    The column was added to MealFoodAssociation after databases were already
+    created (and is missing from smart-balance.sql). create_all() never alters
+    existing tables, so without it every POST /meals with saved_meal=true and
+    every GET /meals fails with UndefinedColumn (HTTP 500). Rows created before
+    the column existed keep NULL: their per-food weight was never stored.
+    """
+    inspector = inspect(engine)
+    meal_food_columns = {
+        column["name"]
+        for column in inspector.get_columns("Meal_Food")
+    }
+
+    if "food_weight_g" in meal_food_columns:
+        return
+
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            connection.execute(
+                text('ALTER TABLE "Meal_Food" ADD COLUMN IF NOT EXISTS food_weight_g FLOAT')
+            )
+        else:
+            connection.execute(
+                text('ALTER TABLE "Meal_Food" ADD COLUMN food_weight_g FLOAT')
+            )
+
+def ensure_pairing_schema():
+    """Ensures that the Pairing table has balance_id, user_id and poll_token_hash.
+
+    Added for the scale to learn the result of its own pairing (GET
+    /pairing/{id}/status). create_all() never alters existing tables, so
+    databases created before (and smart-balance.sql) need these columns.
+    Existing rows keep NULL: they were never bound to a balance or user.
+    """
+    columns = {column["name"] for column in inspect(engine).get_columns("Pairing")}
+    statements = []
+    if "balance_id" not in columns:
+        statements.append('ALTER TABLE "Pairing" ADD COLUMN IF NOT EXISTS balance_id INTEGER '
+                          'REFERENCES "Balance"(id) ON DELETE SET NULL')
+    if "user_id" not in columns:
+        statements.append('ALTER TABLE "Pairing" ADD COLUMN IF NOT EXISTS user_id INTEGER '
+                          'REFERENCES "User"(id) ON DELETE SET NULL')
+    if "poll_token_hash" not in columns:
+        statements.append('ALTER TABLE "Pairing" ADD COLUMN IF NOT EXISTS poll_token_hash VARCHAR')
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            if engine.dialect.name != "postgresql":
+                statement = statement.replace(" IF NOT EXISTS", "")
+            connection.execute(text(statement))
+
 def ensure_food_nutrient_association_schema():
     """"Ensures that the Food_Nutrient association table has a composite primary key on (nutrient_id, food_id), adding it if necessary."""
     inspector = inspect(engine)
@@ -179,6 +234,8 @@ def initialize_database():
     Base.metadata.create_all(bind=engine)
     ensure_nutrient_schema()
     ensure_food_nutrient_association_schema()
+    ensure_meal_food_schema()
+    ensure_pairing_schema()
     seed_categories()
     seed_nutrients()
 

@@ -74,18 +74,20 @@ def test_recognition_to_meal_flow(client, make_user, db):
     food = recognition.json()["items"][0]["recognized_food"]["recognized_food"]
     assert db.get(Food, food["food_id"]) is not None
 
-    meal = client.post("/meals", json={
-        "name": "Lanche", "user_id": user["id"], "consumed_at": "2026-11-20T16:00:00",
-        "weight_g": 180, "list_foods_ids": [food["food_id"]], "saved_meal": True,
+    meal = client.post("/meals", params={"user_id": user["id"]}, json={
+        "name": "Lanche", "consumed_at": "2026-11-20T16:00:00",
+        "list_foods_ids": [food["food_id"]], "list_foods_weights": [180], "saved_meal": True,
     })
-    assert meal.status_code == 200
+    assert meal.status_code == 200, meal.text
     meal_id = meal.json()["id"]
     meals = client.get("/meals", params={"user_id": user["id"]}).json()
     assert meals[0]["foods"][0]["id"] == food["food_id"]
+    assert meals[0]["foods"][0]["weight_g"] == 180
 
+    other_food = 1 if food["food_id"] != 1 else 3
     assert client.patch(f"/meals/{meal_id}/{user['id']}", json={
-        "name": "Lanche da tarde", "user_id": user["id"], "consumed_at": "2026-11-20T16:30:00",
-        "weight_g": 200, "list_foods_ids": [food["food_id"], 1], "saved_meal": True,
+        "name": "Lanche da tarde", "consumed_at": "2026-11-20T16:30:00",
+        "list_foods_ids": [food["food_id"], other_food], "list_foods_weights": [120, 80], "saved_meal": True,
     }).status_code == 200
     assert db.query(MealFoodAssociation).filter_by(meal_id=meal_id).count() == 2
     assert client.delete(f"/meals/{meal_id}/{user['id']}").status_code == 200

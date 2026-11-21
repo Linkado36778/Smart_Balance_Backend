@@ -672,15 +672,13 @@ def list_user_meals(user_id: int, db: DbDependency):
         raise HTTPException(status_code=404, detail="Meal not found")
     result = []
     for meal in meals:
-        foods = (
-            db.query(Food)
+        # Each food is paired with ITS OWN weight from the same association row
+        foods_with_weights = (
+            db.query(Food, MealFoodAssociation.food_weight_g)
             .join(MealFoodAssociation, MealFoodAssociation.food_id == Food.id)
             .filter(MealFoodAssociation.meal_id == meal.id)
             .all()
         )
-
-        for weight in db.query(MealFoodAssociation.food_weight_g).filter(MealFoodAssociation.meal_id == meal.id).all():
-            weight_value = weight[0]
 
         result.append({
             "id": meal.id,
@@ -695,10 +693,10 @@ def list_user_meals(user_id: int, db: DbDependency):
                     "name": food.name,
                     "category_id": food.category_id,
                     "brand_id": food.brand_id,
-                    "weight_g": weight_value,
+                    "weight_g": food_weight_g,
                     "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
                 }
-                for food in foods
+                for food, food_weight_g in foods_with_weights
             ],
         })
     return result

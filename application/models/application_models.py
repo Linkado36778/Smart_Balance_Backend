@@ -280,6 +280,17 @@ class Pairing(Base):
     expires_at: Mapped[datetime] = mapped_column(index=True)
     used_at: Mapped[Optional[datetime]] = mapped_column(index=True, default=None)
     created_at: Mapped[datetime] = mapped_column(init=False, default=datetime.now)
+    # Balanca que gerou o QR Code (o token so pode parear esta balanca)
+    balance_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("Balance.id", ondelete="SET NULL"), index=True, default=None
+    )
+    # Usuario que consumiu o token (preenchido por POST /pair-scale)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("User.id", ondelete="SET NULL"), index=True, default=None
+    )
+    # Hash da credencial de consulta entregue SOMENTE a balanca que gerou o
+    # QR Code (nunca vai no QR); autoriza GET /pairing/{id}/status
+    poll_token_hash: Mapped[Optional[str]] = mapped_column(default=None)
 
 
 class Balance(Base):

@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import hashlib
+import hmac
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, List, Optional
@@ -11,7 +12,7 @@ from urllib.parse import urlencode
 
 import qrcode
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
@@ -736,28 +737,44 @@ def register_balance(balance: PostCreateBalanceBodyRequest, db: DbDependency):
 #     )
 
 
+def hash_pairing_secret(secret: str) -> str:
+    """SHA-256 of a pairing secret (QR token or poll token); only hashes are stored."""
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
 @router.post("/generate_qr_code/")
-def generate_qr_code(db: DbDependency):
-    """Cria um token temporário e devolve seu QR Code."""
+def generate_qr_code(db: DbDependency, balance_id: Optional[int] = None):
+    """Cria um token temporário e devolve seu QR Code.
+
+    balance_id (opcional, enviado pela balança): vincula o token àquela
+    balança, de modo que /pair-scale só possa parear esta balança. A resposta
+    traz também poll_token, credencial que apenas quem gerou o código recebe
+    (não vai no QR Code) e que autoriza GET /pairing/{pairing_id}/status.
+    """
+
+    if balance_id is not None and db.query(Balance).filter(Balance.id == balance_id).first() is None:
+        raise HTTPException(status_code=404, detail="Balance not found")
 
     pairing_token = secrets.token_urlsafe(32)
-
-    token_hash = hashlib.sha256(
-        pairing_token.encode("utf-8")
-    ).hexdigest()
+    poll_token = secrets.token_urlsafe(32)
+    validity = timedelta(minutes=5)
 
     db_pairing = Pairing(
-        token_hash=token_hash,
-        expires_at=datetime.now() + timedelta(minutes=5),
+        token_hash=hash_pairing_secret(pairing_token),
+        expires_at=datetime.now() + validity,
         used_at=None,
+        balance_id=balance_id,
+        poll_token_hash=hash_pairing_secret(poll_token),
     )
 
     db.add(db_pairing)
     db.commit()
     db.refresh(db_pairing)
 
-    query_string = urlencode({"token": pairing_token})
-    pairing_url = f"{BASE_URL}/pair-scale?{query_string}"
+    query = {"token": pairing_token}
+    if balance_id is not None:
+        query["balance_id"] = balance_id
+    pairing_url = f"{BASE_URL}/pair-scale?{urlencode(query)}"
 
     qr_image = qrcode.make(pairing_url)
     QR_CODES_DIR.mkdir(exist_ok=True)
@@ -771,22 +788,31 @@ def generate_qr_code(db: DbDependency):
             "pairing_url": pairing_url,
             "pairing_id": db_pairing.id,
             "expires_at": db_pairing.expires_at,
+            # validade relativa: expires_at e hora local naive do servidor,
+            # entao clientes em outro fuso usam expires_in (segundos)
+            "expires_in": int(validity.total_seconds()),
             "qr_code_url": qr_code_url,
+            "balance_id": db_pairing.balance_id,
+            "poll_token": poll_token,
         },
         success=True,
     )
 
 @router.post("/pair-scale")
-def pair_scale(user_id: int, balance_id: int, token: str, db: DbDependency):
-    """Endpoint to pair a scale using a token from the QR code."""
+def pair_scale(user_id: int, token: str, db: DbDependency, balance_id: Optional[int] = None):
+    """Endpoint to pair a scale using a token from the QR code.
 
-    token_hash = hashlib.sha256(
-        token.encode("utf-8")
-    ).hexdigest()
+    Quando o QR Code foi gerado pela balança (token vinculado a balance_id),
+    a balança é a do token: balance_id pode ser omitido e, se enviado, deve
+    coincidir. Tokens antigos (sem balança) continuam exigindo balance_id.
+    Parear de novo o mesmo usuário com a mesma balança é idempotente: o
+    vínculo não é duplicado e o token é consumido, para a balança confirmar.
+    """
 
     db_pairing = (
         db.query(Pairing)
-        .filter(Pairing.token_hash == token_hash)
+        .filter(Pairing.token_hash == hash_pairing_secret(token))
+        .with_for_update()
         .first()
     )
 
@@ -798,6 +824,13 @@ def pair_scale(user_id: int, balance_id: int, token: str, db: DbDependency):
 
     if db_pairing.expires_at < datetime.now():
         raise HTTPException(status_code=400, detail="Token expired")
+
+    if db_pairing.balance_id is not None:
+        if balance_id is not None and balance_id != db_pairing.balance_id:
+            raise HTTPException(status_code=400, detail="Token does not belong to this balance")
+        balance_id = db_pairing.balance_id
+    elif balance_id is None:
+        raise HTTPException(status_code=400, detail="balance_id is required for this token")
 
     if db.query(User).filter(User.id == user_id).first() is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -811,29 +844,78 @@ def pair_scale(user_id: int, balance_id: int, token: str, db: DbDependency):
         .filter(UserBalanceAssociation.balance_id == balance_id)
         .first()
     )
-    if already_paired is not None:
-        raise HTTPException(status_code=400, detail="Scale already paired with this user")
-
-    associated_balance = (
-        UserBalanceAssociation(
-            user_id=user_id,
-            balance_id=balance_id
-    )
-    )
-
-    db.add(associated_balance)
+    if already_paired is None:
+        db.add(UserBalanceAssociation(user_id=user_id, balance_id=balance_id))
 
     db_pairing.used_at = datetime.now()
+    db_pairing.user_id = user_id
+    db_pairing.balance_id = balance_id
     db.commit()
     db.refresh(db_pairing)
 
     return ReturnModel(
-        message="Scale paired successfully",
+        message="Scale already paired with this user" if already_paired else "Scale paired successfully",
         data={
             "pairing_id": db_pairing.id,
             "user_id": user_id,
             "balance_id": balance_id,
             "used_at": db_pairing.used_at,
+        },
+        success=True,
+    )
+
+
+@router.get("/pairing/{pairing_id}/status")
+def pairing_status(
+    pairing_id: int,
+    db: DbDependency,
+    poll_token: Annotated[Optional[str], Header(alias="X-Pairing-Token")] = None,
+):
+    """Estado do pareamento, consultado pela balança que gerou o QR Code.
+
+    Exige o poll_token devolvido por /generate_qr_code/ (header
+    X-Pairing-Token). ID inexistente e token errado respondem igual (404),
+    para não revelar quais pareamentos existem. status:
+      pending  - aguardando o app ler o QR Code
+      expired  - não usado dentro da validade
+      paired   - concluído e vínculo usuário/balança ativo (traz user_id)
+      unpaired - concluído, mas o vínculo foi removido depois
+    """
+    if not poll_token:
+        raise HTTPException(status_code=401, detail="Pairing token required")
+
+    db_pairing = db.query(Pairing).filter(Pairing.id == pairing_id).first()
+    if (
+        db_pairing is None
+        or db_pairing.poll_token_hash is None
+        or not hmac.compare_digest(db_pairing.poll_token_hash, hash_pairing_secret(poll_token))
+    ):
+        raise HTTPException(status_code=404, detail="Pairing not found")
+
+    user_id = None
+    if db_pairing.used_at is not None and db_pairing.user_id is not None:
+        active = (
+            db.query(UserBalanceAssociation)
+            .filter(UserBalanceAssociation.user_id == db_pairing.user_id)
+            .filter(UserBalanceAssociation.balance_id == db_pairing.balance_id)
+            .first()
+            is not None
+        )
+        status = "paired" if active else "unpaired"
+        user_id = db_pairing.user_id if active else None
+    elif db_pairing.used_at is None and db_pairing.expires_at < datetime.now():
+        status = "expired"
+    else:
+        status = "pending"
+
+    return ReturnModel(
+        message="Pairing status",
+        data={
+            "pairing_id": db_pairing.id,
+            "status": status,
+            "user_id": user_id,
+            "balance_id": db_pairing.balance_id,
+            "expires_at": db_pairing.expires_at,
         },
         success=True,
     )
