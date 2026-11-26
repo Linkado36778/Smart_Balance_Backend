@@ -1,6 +1,6 @@
 """Food search and meal management endpoints."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from typing import Annotated, Any, Dict, List, Optional, Union
 from unicodedata import normalize
@@ -79,6 +79,36 @@ class PostCreateMealBodyRequest(BaseModel):
         return value
 
 #region Helpers
+
+def _load_local_timezone():
+    """Fuso dos horarios gravados (horario de Brasilia, sem horario de verao desde 2019).
+
+    A imagem python:slim nao traz tzdata; sem ele, usa o offset fixo -03:00.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/Sao_Paulo")
+    except Exception:  # ZoneInfoNotFoundError quando falta tzdata
+        return timezone(timedelta(hours=-3))
+
+LOCAL_TIMEZONE = _load_local_timezone()
+
+# Clientes que enviam consumed_at SEM fuso (balanca/firmware) mandam o horario
+# em UTC no POST /meals; ver commit 6e73391 (fix(UTCTime)).
+NAIVE_UTC_OFFSET = timedelta(hours=3)
+
+def to_local_consumed_at(value: datetime, naive_is_utc: bool) -> datetime:
+    """Converte consumed_at para o horario local (naive) gravado no banco.
+
+    - Com fuso (ex.: "2026-11-25T12:00:00-03:00", enviado pelo APP): converte
+      para o horario de Brasilia, sem ajuste extra.
+    - Sem fuso: mantem o comportamento anterior de cada rota. No POST /meals o
+      valor e tratado como UTC (-3h, contrato atual da balanca); no PATCH e
+      gravado como veio.
+    """
+    if value.tzinfo is not None:
+        return value.astimezone(LOCAL_TIMEZONE).replace(tzinfo=None)
+    return value - NAIVE_UTC_OFFSET if naive_is_utc else value
 
 def calculate_meal_calories(db: Session, foods: List["Food"]) -> float:
     """Sum the calories of the given foods using their per-100g nutrient amounts."""
@@ -709,7 +739,7 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency, user_id: int)
     new_meal = Meal(
         name = meal.name,
         user_id = user.id,
-        consumed_at = meal.consumed_at - timedelta(hours=3),
+        consumed_at = to_local_consumed_at(meal.consumed_at, naive_is_utc=True),
         calories = total_calories,
         weight_g = total_weight,
         saved_meal = meal.saved_meal
@@ -753,7 +783,7 @@ def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db:
     foods, total_calories, _ = calculate_meal_totals(db, meal, user_id)
 
     updated_meal.name = meal.name
-    updated_meal.consumed_at = meal.consumed_at
+    updated_meal.consumed_at = to_local_consumed_at(meal.consumed_at, naive_is_utc=False)
     updated_meal.calories = total_calories
     updated_meal.weight_g = total_weight
     updated_meal.saved_meal = meal.saved_meal

@@ -56,7 +56,8 @@ class TestCreateMeal:
         assert abs(body["calories"] - expected_calories(db, [(1, 150.0), (3, 100.0)])) < 1e-6
         row = db.get(Meal, body["id"])
         assert row.user_id == user["id"] and row.weight_g == 250.0 and row.saved_meal is True
-        assert row.consumed_at == datetime(2026, 11, 20, 12, 30)
+        # sem fuso o POST trata o horario como UTC (contrato da balanca, commit 6e73391)
+        assert row.consumed_at == datetime(2026, 11, 20, 9, 30)
         assert food_weights(db, row.id) == {1: 150.0, 3: 100.0}
 
     def test_calories_scale_with_weight(self, client, make_user):
@@ -197,3 +198,56 @@ class TestDeleteMeal:
         assert db.query(MealFoodAssociation).filter_by(meal_id=meal_id).count() == 0
         assert client.delete(f"/meals/{meal_id}/{owner['id']}").status_code == 404
         assert client.delete("/meals/abc/1").status_code == 422
+
+
+class TestMealTimezone:
+    """consumed_at com fuso (APP) e sem fuso (balanca) - refeicoes salvas 3h atrasadas."""
+
+    def test_app_local_time_with_offset_is_saved_as_sent(self, client, make_user, db):
+        user = make_user()
+        response = post_meal(client, user["id"], consumed_at="2026-11-25T12:00:00-03:00")
+        assert response.status_code == 200, response.text
+        assert response.json()["consumed_at"].startswith("2026-11-25T12:00:00")
+        assert db.get(Meal, response.json()["id"]).consumed_at == datetime(2026, 11, 25, 12, 0)
+
+    def test_utc_with_z_is_converted_to_brasilia(self, client, make_user, db):
+        user = make_user()
+        response = post_meal(client, user["id"], consumed_at="2026-11-25T15:00:00Z")
+        assert db.get(Meal, response.json()["id"]).consumed_at == datetime(2026, 11, 25, 12, 0)
+
+    def test_firmware_naive_time_keeps_previous_behavior(self, client, make_user, db):
+        """Corpo da balanca (sem fuso): continua -3h, sem mudar o contrato do firmware."""
+        user = make_user()
+        response = client.post(
+            f"/meals?user_id={user['id']}",
+            content='{"name":"Refeição","consumed_at":"2026-11-21 15:00:00",'
+                    '"list_foods_ids":[1],"list_foods_weights":[200],"saved_meal":true}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 200, response.text
+        assert db.get(Meal, response.json()["id"]).consumed_at == datetime(2026, 11, 21, 12, 0)
+
+    def test_update_with_offset_and_without(self, client, make_user, db):
+        user = make_user()
+        meal_id = post_meal(client, user["id"], consumed_at="2026-11-25T12:00:00-03:00").json()["id"]
+        updated = client.patch(f"/meals/{meal_id}/{user['id']}", json=meal_payload(consumed_at="2026-11-25T19:30:00-03:00"))
+        assert updated.status_code == 200, updated.text
+        db.expire_all()
+        assert db.get(Meal, meal_id).consumed_at == datetime(2026, 11, 25, 19, 30)
+        # PATCH sem fuso: gravado como veio (comportamento anterior)
+        client.patch(f"/meals/{meal_id}/{user['id']}", json=meal_payload(consumed_at="2026-11-25T20:00:00"))
+        db.expire_all()
+        assert db.get(Meal, meal_id).consumed_at == datetime(2026, 11, 25, 20, 0)
+
+    def test_fallback_timezone_without_tzdata(self, monkeypatch):
+        import builtins
+        from application.controller import food_controller
+
+        real_import = builtins.__import__
+        def no_zoneinfo(name, *args, **kwargs):
+            if name == "zoneinfo":
+                raise ImportError("sem tzdata")
+            return real_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, "__import__", no_zoneinfo)
+        tz = food_controller._load_local_timezone()
+        assert datetime(2026, 11, 25, 15, 0, tzinfo=__import__("datetime").timezone.utc).astimezone(tz).hour == 12
