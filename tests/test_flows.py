@@ -34,11 +34,46 @@ def test_allergen_flow_marks_foods(client, make_user, db):
     assert client.post("/add_allergen_to_user", json={"user_id": user["id"], "allergen_id": allergen["id"]}).status_code == 200
     created = client.post("/foods", params={"user_id": user["id"]}, json={"name": f"Bolo {user['id']}", "allergen_ids": [allergen["id"]]})
     assert created.status_code == 200
-    from application.models.application_models import CreatedFood
 
-    created_id = db.query(CreatedFood).filter_by(user_id=user["id"]).one().id
-    assert client.get(f"/foods/{created_id}", params={"user_id": user["id"]}).json()["user_allergic"] is True
+    created_id = db.query(Food).filter_by(user_id=user["id"]).one().id
+    own_foods = client.get("/foods/created", params={"user_id": user["id"]}).json()
+    assert [(f["id"], f["user_allergic"]) for f in own_foods] == [(created_id, True)]
     assert [a["id"] for a in client.get(f"/list_allergens_by_user/{user['id']}").json()] == [allergen["id"]]
+
+
+def test_meal_with_user_created_food(client, make_user, db):
+    """Alimento criado pelo usuario entra na refeicao; o de outro usuario nao."""
+    user, other = make_user(), make_user()
+    for owner in (user, other):
+        response = client.post("/foods", params={"user_id": owner["id"]}, json={
+            "name": "Pao caseiro de fluxo", "nutrients": [{"id": 1, "amount": 8.0}, {"id": 2, "amount": 50.0}],
+        })
+        assert response.status_code == 200, response.text
+    own_id = db.query(Food).filter_by(user_id=user["id"]).one().id
+    other_id = db.query(Food).filter_by(user_id=other["id"]).one().id
+
+    meal = {"name": "Cafe", "consumed_at": "2026-11-21 08:00:00", "saved_meal": True,
+            "list_foods_ids": [1, own_id], "list_foods_weights": [100, 50]}
+    created = client.post("/meals", params={"user_id": user["id"]}, json=meal)
+    assert created.status_code == 200, created.text
+    # 50 g do pao: 4 g proteina * 4 + 25 g carboidrato * 4 = 116 kcal, somado a 100 g de arroz
+    from application.models.application_models import FoodNutrientAssociation, Nutrient
+
+    rice_kcal = sum(
+        assoc.amount * (nutrient.calories_per_unit or 0.0)
+        for assoc, nutrient in db.query(FoodNutrientAssociation, Nutrient)
+        .join(Nutrient, Nutrient.id == FoodNutrientAssociation.nutrient_id)
+        .filter(FoodNutrientAssociation.food_id == 1)
+    )
+    assert created.json()["calories"] == pytest.approx(rice_kcal + 116)
+
+    listed = client.get("/meals", params={"user_id": user["id"]}).json()
+    foods = {f["id"]: f for f in listed[0]["foods"]}
+    assert foods[own_id]["weight_g"] == 50 and foods[own_id]["created_by_user"] is True
+    assert foods[1]["created_by_user"] is False
+
+    foreign = client.post("/meals", params={"user_id": user["id"]}, json={**meal, "list_foods_ids": [1, other_id]})
+    assert foreign.status_code == 400, foreign.text
 
 
 def test_scale_pairing_flow(client, make_user, db):

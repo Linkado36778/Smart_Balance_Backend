@@ -10,7 +10,7 @@ from application.models.application_models import (
     FoodNutrientAssociation,
     Nutrient,
 )
-from shared.database import SESSEON_LOCAL, initialize_database
+from shared.database import SESSEON_LOCAL, initialize_database, seed_food_model_labels
 
 
 SPREADSHEET_PATH = Path(__file__).parent / "Tabela_nutricional_TACO.xlsx"
@@ -180,7 +180,13 @@ def populate_foods() -> None:
 
         for food_data in foods:
             category = categories[food_data["category"]]
-            food = db.query(Food).filter(Food.name == food_data["name"]).first()
+            # somente alimentos globais; os criados por usuarios nunca sao alterados
+            food = (
+                db.query(Food)
+                .filter(Food.name == food_data["name"])
+                .filter(Food.user_id.is_(None))
+                .first()
+            )
 
             if food is None:
                 food = Food(
@@ -222,6 +228,9 @@ def populate_foods() -> None:
         raise
     finally:
         db.close()
+
+    # Os prompts do SigLIP dependem dos alimentos ja existirem no banco
+    seed_food_model_labels()
 
 
 if __name__ == "__main__":

@@ -129,7 +129,7 @@ class TestListMeals:
         meals = response.json()
         assert [m["id"] for m in meals] == [meal_id]
         assert sorted(f["id"] for f in meals[0]["foods"]) == [1, 3]
-        assert all(set(f) == {"id", "name", "category_id", "brand_id", "weight_g", "image"} for f in meals[0]["foods"])
+        assert all(set(f) == {"id", "name", "category_id", "brand_id", "weight_g", "image", "created_by_user"} for f in meals[0]["foods"])
 
     def test_each_food_has_its_own_weight(self, client, make_user):
         """Cada alimento traz o proprio peso (antes todos recebiam o ultimo peso da refeicao)."""

@@ -8,7 +8,9 @@ import os
 import cv2
 
 from application.controller.food_controller import get_food_nutrients_by_weight
-from application.models.application_models import Food, Nutrient
+from application.models.application_models import Food
+from shared.database import build_model_label
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -101,108 +103,10 @@ VALID_EXTENSIONS = {
     ".webp"
 }
 
-LABELS = [
-    {
-        "model_label": "an image of cooked white rice",
-        "db_name": "Arroz tipo 1, cozido",
-    },
-    {
-        "model_label": "an image of raw black beans",
-        "db_name": "Feijão preto, cru",
-    },
-    {
-        "model_label": "an image of cooked black beans",
-        "db_name": "Feijão preto, cozido",
-    },
-    {
-        "model_label": "an image of raw curly lettuce",
-        "db_name": "Alface crespa, crua",
-    },
-    {
-        "model_label": "an image of grilled beef liver",
-        "db_name": "Fígado bovino, grelhado (bife de fígado)",
-    },
-    {
-        "model_label": "an image of a fried egg",
-        "db_name": "Ovo de galinha, frito",
-    },
-    {
-        "model_label": "an image of a Fuji apple with peel",
-        "db_name": "Maçã Fuji, com casca, crua",
-    },
-    {
-        "model_label": "an image of a raw banana",
-        "db_name": "Banana prata, crua",
-    },
-    {
-        "model_label": "an image of a raw salad tomato",
-        "db_name": "Tomate salada, cru",
-    },
-    {
-        "model_label": "an image of french fries",
-        "db_name": "Batata inglesa, frita",
-    },
-    {
-        "model_label": "an image of raw whole chicken with skin",
-        "db_name": "Frango inteiro, cru, com pele",
-    },
-    {
-        "model_label": "an image of roasted whole chicken with skin",
-        "db_name": "Frango inteiro, assado, com pele",
-    },
-    {
-        "model_label": "an image of raw skinless chicken breast",
-        "db_name": "Peito de frango, sem pele, cru",
-    },
-    {
-        "model_label": "an image of cooked skinless chicken breast",
-        "db_name": "Peito de frango, sem pele, cozido",
-    },
-    {
-        "model_label": "an image of raw chicken breast with skin",
-        "db_name": "Peito de frango, com pele, cru",
-    },
-    {
-        "model_label": "an image of roasted chicken breast with skin",
-        "db_name": "Peito de frango, com pele, assado",
-    },
-    {
-        "model_label": "an image of raw chicken thigh with skin",
-        "db_name": "Coxa de frango, com pele, crua",
-    },
-    {
-        "model_label": "an image of roasted chicken thigh with skin",
-        "db_name": "Coxa de frango, com pele, assada",
-    },
-    {
-        "model_label": "an image of raw chicken wing with skin",
-        "db_name": "Asa de frango, com pele, crua",
-    },
-    {
-        "model_label": "an image of roasted chicken wing with skin",
-        "db_name": "Asa de frango, com pele, assada",
-    },
-    {
-        "model_label": "an image of raw chicken hearts",
-        "db_name": "Coração de frango, cru",
-    },
-    {
-        "model_label": "an image of grilled chicken hearts",
-        "db_name": "Coração de frango, grelhado",
-    },
-    {
-        "model_label": "an image of raw chicken liver",
-        "db_name": "Fígado de frango, cru",
-    },
-    {
-        "model_label": "an image of grilled chicken liver",
-        "db_name": "Fígado de frango, grelhado",
-    },
-    {
-        "model_label": "an image of breaded chicken fillet",
-        "db_name": "Filé de frango à milanesa",
-    },
-]
+# Os prompts (labels) do SigLIP ficam no banco, na coluna Food.model_label (os
+# curados dos alimentos globais sao semeados por
+# shared.database.DEFAULT_FOOD_MODEL_LABELS). Alimento criado pelo usuario sem
+# prompt recebe um gerado a partir do nome (shared.database.build_model_label).
 
 # ----------------------------
 # MODEL
@@ -217,8 +121,10 @@ model_name = os.getenv("SIGLIP_MODEL_NAME", "google/siglip-base-patch16-224")
 processor = None
 model = None
 
-# Prepare text labels once
-texts = [label["model_label"] for label in LABELS]
+# Cache de embeddings de texto (prompt -> vetor normalizado). Os prompts sao
+# codificados uma unica vez; em cada requisicao so a imagem passa pelo modelo.
+# Como a chave e o proprio texto, um prompt editado gera um embedding novo.
+_text_embedding_cache: dict[str, torch.Tensor] = {}
 
 # ----------------------------
 # IMAGE RECOGNITION
@@ -628,13 +534,19 @@ def find_changed_region(
     )
 
 
-def recognize_changed_foods(prev_path: str, curr_path: str, db: Session,  weight: float | None = None):
+def recognize_changed_foods(
+    prev_path: str,
+    curr_path: str,
+    db: Session,
+    weight: float | None = None,
+    user_id: int | None = None,
+):
     crop_path, bbox = find_changed_region(prev_path, curr_path)
 
     with open(crop_path, "rb") as crop_file:
         crop_bytes = crop_file.read()
 
-    recognition = image_recognition_endpoint(crop_bytes, db, weight=weight)
+    recognition = image_recognition_endpoint(crop_bytes, db, weight=weight, user_id=user_id)
 
     return {
         "changed": True,
@@ -678,93 +590,173 @@ def _get_model():
         processor = AutoProcessor.from_pretrained(model_name)
         model = AutoModel.from_pretrained(model_name).to(device)
         model.eval()
+        _text_embedding_cache.clear()
 
     return processor, model
 
 
-def image_recognition_endpoint(image_data: bytes | str, db: Session, top_k: int = 3, weight: float | None = None):
+# ---------------------------------------------------------------------------
+# Candidatos ao reconhecimento
+# ---------------------------------------------------------------------------
+
+def get_recognition_candidates(db: Session, user_id: int | None = None) -> list[dict]:
+    """Monta os candidatos do reconhecimento para um usuario.
+
+    - Alimentos globais (Food.user_id NULL) que possuem model_label preenchido.
+    - Alimentos criados SOMENTE pelo proprio usuario (Food.user_id == user_id);
+      os de outros usuarios nunca entram.
+
+    "source" indica a origem ("food" = global, "created_food" = do usuario);
+    "food_id" e sempre o id da tabela Food.
+    """
+    global_foods = (Food.user_id.is_(None)) & Food.model_label.isnot(None) & (Food.model_label != "")
+    condition = or_(global_foods, Food.user_id == user_id) if user_id is not None else global_foods
+
+    foods = (
+        db.query(Food)
+        .filter(condition)
+        .order_by(Food.user_id.is_not(None), Food.id)
+        .all()
+    )
+
+    return [
+        {
+            "source": "food" if food.user_id is None else "created_food",
+            "food_id": food.id,
+            "name": food.name,
+            "model_label": build_model_label(food.name, food.model_label),
+            "category_id": food.category_id,
+            "brand_id": food.brand_id,
+        }
+        for food in foods
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Embeddings
+# ---------------------------------------------------------------------------
+
+def _pooled_features(output) -> torch.Tensor:
+    # transformers >= 5 devolve BaseModelOutputWithPooling; versoes antigas, o tensor
+    return output.pooler_output if hasattr(output, "pooler_output") else output
+
+
+def _get_text_embeddings(texts: list[str]) -> torch.Tensor:
+    """Embeddings normalizados dos prompts, codificando apenas os ainda nao cacheados."""
+    missing = [text for text in dict.fromkeys(texts) if text not in _text_embedding_cache]
+
+    if missing:
+        processor, model = _get_model()
+
+        inputs = processor(
+            text=missing,
+            return_tensors="pt",
+            padding="max_length"  # o SigLIP foi treinado com max_length
+        )
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            features = _pooled_features(model.get_text_features(**inputs))
+            features = features / features.norm(p=2, dim=-1, keepdim=True)
+
+        for text, feature in zip(missing, features):
+            _text_embedding_cache[text] = feature
+
+    return torch.stack([_text_embedding_cache[text] for text in texts])
+
+
+def _get_image_embedding(image: Image.Image) -> torch.Tensor:
+    processor, model = _get_model()
+
+    inputs = processor(images=image, return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        features = _pooled_features(model.get_image_features(**inputs))
+        features = features / features.norm(p=2, dim=-1, keepdim=True)
+
+    return features[0]
+
+
+def _score_candidates(image: Image.Image, texts: list[str]) -> torch.Tensor:
+    """Probabilidade (softmax) de cada prompt; equivale a model(...).logits_per_image."""
+    image_embedding = _get_image_embedding(image)
+    text_embeddings = _get_text_embeddings(texts)
+    _, model = _get_model()
+
+    with torch.no_grad():
+        logits = text_embeddings @ image_embedding
+        logits = logits * model.logit_scale.exp() + model.logit_bias
+        return torch.softmax(logits, dim=-1)
+
+
+# ---------------------------------------------------------------------------
+# Reconhecimento
+# ---------------------------------------------------------------------------
+
+def image_recognition_endpoint(
+    image_data: bytes | str,
+    db: Session,
+    top_k: int = 3,
+    weight: float | None = None,
+    user_id: int | None = None,
+):
     image_bytes = _normalize_image_bytes(image_data)
-    top_k = min(top_k, len(LABELS))
 
     try:
         image = Image.open(BytesIO(image_bytes)).convert("RGB")
     except Exception as exc:
         raise ValueError("Invalid image data. Send a valid JPG, PNG or WEBP image.") from exc
 
-    processor, model = _get_model()
+    candidates = get_recognition_candidates(db, user_id)
 
-    inputs = processor(
-        text=texts,
-        images=image,
-        return_tensors="pt",
-        padding="max_length"
-    )
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No foods available for recognition.")
 
-    inputs = {
-        k: v.to(device)
-        for k, v in inputs.items()
-    }
+    top_k = min(top_k, len(candidates))
 
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits_per_image[0]
-        probs = torch.softmax(logits, dim=-1)
-        top_probs, top_idx = torch.topk(probs, k=top_k)
+    probs = _score_candidates(image, [candidate["model_label"] for candidate in candidates])
+    top_probs, top_idx = torch.topk(probs, k=top_k)
 
     top_confidences = top_probs.detach().cpu().tolist()
     top_indices = top_idx.detach().cpu().tolist()
 
     predictions = [
         {
-            "label": LABELS[int(index)]["db_name"],
-            "model_label": LABELS[int(index)]["model_label"],
+            "label": candidates[int(index)]["name"],
+            "model_label": candidates[int(index)]["model_label"],
+            "source": candidates[int(index)]["source"],
+            "food_id": candidates[int(index)]["food_id"],
             "confidence": float(prob)
         }
         for prob, index in zip(top_confidences, top_indices)
     ]
 
-    recognized_food = recognize_food_from_database(db, predictions[0]["label"])
-
-    if weight is not None:
-        recognized_food_weight = recognize_food_from_database_weight(db, predictions[0]["label"], weight)
+    recognized_food = build_recognized_food(db, candidates[int(top_indices[0])], weight)
 
     return {
         "model": MODEL_NAME,
         "language": LABEL_LANGUAGE,
-        "recognized_food": recognized_food_weight if weight is not None else recognized_food,
+        "recognized_food": recognized_food,
         "confidence": predictions[0]["confidence"],
         "predictions": predictions
     }
 
 
-def recognize_food_from_database(db: Session, prediction: str):
-    db_search = db.query(Food).filter(Food.name == prediction).first()
-
-    if not db_search:
-        raise HTTPException(status_code=404, detail="Food not found in the database.")
-    else:
-        return {
-            "message": "Food found in the database.",
-            "food_id": db_search.id,
-            "food_name": db_search.name,
-            "category_id": db_search.category_id,
-            "brand_id": db_search.brand_id,
-        }
-
-
-def recognize_food_from_database_weight(db: Session, prediction: str, weight: float):
-    db_search = db.query(Food).filter(Food.name == prediction).first()
-
-    if db_search is None:
-        raise HTTPException(status_code=404, detail="Food not found")
-
-    nutrient_amounts = get_food_nutrients_by_weight(db, db_search.id, weight)
-
-    return {
+def build_recognized_food(db: Session, candidate: dict, weight: float | None = None):
+    """Monta o alimento reconhecido; com peso, inclui os nutrientes ajustados."""
+    recognized_food = {
         "message": "Food found in the database.",
-        "food_id": db_search.id,
-        "food_name": db_search.name,
-        "category_id": db_search.category_id,
-        "brand_id": db_search.brand_id,
-        "nutrients": nutrient_amounts["nutrients"]
+        "source": candidate["source"],
+        "food_id": candidate["food_id"],
+        "food_name": candidate["name"],
+        "category_id": candidate["category_id"],
+        "brand_id": candidate["brand_id"],
     }
+
+    if weight is not None:
+        nutrient_amounts = get_food_nutrients_by_weight(db, candidate["food_id"], weight)
+        recognized_food["nutrients"] = nutrient_amounts["nutrients"]
+
+    return recognized_food
+

@@ -124,12 +124,11 @@ def main():
     http.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_id": nutri["id"]})
     http.post("/add_allergen_to_user", json={"user_id": user["id"], "allergen_id": 1})
     http.post("/foods", params={"user_id": user["id"]}, json={"name": "perf-food", "nutrients": [{"id": 1, "amount": 5}]})
-    created_food_id = http.get("/foods/1", params={"user_id": user["id"]})  # nao usado; aquece rota
-    from application.models.application_models import CreatedFood
+    from application.models.application_models import Food
     from shared.database import SESSEON_LOCAL
 
     with SESSEON_LOCAL() as s:
-        created_food_id = s.query(CreatedFood).filter_by(user_id=user["id"]).one().id
+        created_food_id = s.query(Food).filter_by(user_id=user["id"]).one().id
     meal_body = {"name": "perf", "user_id": user["id"], "consumed_at": "2026-11-20T12:00:00", "weight_g": 200,
                  "list_foods_ids": [1, 3], "saved_meal": True}
     meal_id = http.post("/meals", json=meal_body).json()["id"]
@@ -192,7 +191,7 @@ def main():
     add("POST /pair-scale", lambda: ("POST", "/pair-scale", {"params": {"user_id": fresh_user_id(), "balance_id": balance_id, "token": token()}}))
     add("GET /foods", lambda: ("GET", "/foods", {"params": {"user_id": user["id"]}}))
     add("GET /foods?name=frango", lambda: ("GET", "/foods", {"params": {"user_id": user["id"], "name": "frango"}}))
-    add("GET /foods/{food_id}", lambda: ("GET", f"/foods/{created_food_id}", {"params": {"user_id": user["id"]}}))
+    add("GET /foods/created", lambda: ("GET", "/foods/created", {"params": {"user_id": user["id"]}}))
     add("POST /foods", lambda: ("POST", "/foods", {"params": {"user_id": user["id"]}, "json": {"name": f"pf-{uuid.uuid4().hex[:8]}", "nutrients": [{"id": 1, "amount": 3}], "allergen_ids": [1]}}))
     add("PATCH /foods/{food_id}", lambda: ("PATCH", f"/foods/{created_food_id}", {"params": {"user_id": user["id"]}, "json": {"name": "perf-food", "nutrients": [{"id": 2, "amount": 4}]}}))
 
@@ -200,7 +199,7 @@ def main():
         name = f"del-{uuid.uuid4().hex[:8]}"
         http.post("/foods", params={"user_id": user["id"]}, json={"name": name})
         with SESSEON_LOCAL() as s:
-            fid = s.query(CreatedFood).filter_by(name=name).one().id
+            fid = s.query(Food).filter_by(name=name, user_id=user["id"]).one().id
         return ("DELETE", f"/foods/{fid}", {"params": {"user_id": user["id"]}})
 
     add("DELETE /foods/{food_id}", delete_food)

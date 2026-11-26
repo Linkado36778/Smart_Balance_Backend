@@ -7,12 +7,12 @@ from unicodedata import normalize
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from shared.database import get_db
-from application.models.application_models import CreatedFood, Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, CreatedFoodNutrientAssociation, CreatedFoodAllergenAssociation
+from shared.database import build_model_label, get_db
+from application.models.application_models import Nutrient, Food, Brand, Category, Meal, User, Allergen, FoodNutrientAssociation, AllergenFoodAssociation, MealFoodAssociation, UserAllergenAssociation, DietFoodAssociation
 from application.models.return_models import ReturnModel, ReturnException
 
 
@@ -40,6 +40,15 @@ class PostCreatedFoodBodyRequest(BaseModel):
     brand_id: Optional[int] = None
     nutrients: List[NutrientAmount] = Field(default_factory=list)
     allergen_ids: List[int] = Field(default_factory=list)
+    model_label: Optional[str] = None
+
+    @field_validator("model_label")
+    def clean_model_label(cls, value):
+        """Treat blank prompts as absent."""
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 class PostCreateBrandBodyRequest(BaseModel):
@@ -147,6 +156,11 @@ def get_food_nutrients_by_weight(db: Session, food_id: int, weight: float):
         .all()
     )
 
+    return scale_nutrients_by_weight(nutrients_with_amounts, weight)
+
+
+def scale_nutrients_by_weight(nutrients_with_amounts: List[Any], weight: float):
+    """Scales (Nutrient, amount per 100g) pairs to the given weight."""
     # Adjust amounts based on the provided weight
     adjusted_nutrients = []
     for nutrient, amount in nutrients_with_amounts:
@@ -164,6 +178,67 @@ def get_food_nutrients_by_weight(db: Session, food_id: int, weight: float):
             for nutrient, adjusted_amount in adjusted_nutrients
         ]
     }
+
+
+def visible_to_user(user_id: int):
+    """Filtro dos alimentos que o usuario enxerga: os globais e os criados por ele."""
+    return or_(Food.user_id.is_(None), Food.user_id == user_id)
+
+
+def get_visible_food(db: Session, food_id: int, user_id: int) -> Optional[Food]:
+    """Busca um alimento global ou do proprio usuario (None se nao existir/nao for dele)."""
+    return db.query(Food).filter(Food.id == food_id).filter(visible_to_user(user_id)).first()
+
+
+def serialize_foods(db: Session, foods: List[Food], user_id: int) -> List[Dict[str, Any]]:
+    """Formata alimentos com nutrientes e a flag de alergia do usuario."""
+    food_ids = [food.id for food in foods]
+
+    allergic_food_ids = {
+        food_id
+        for (food_id,) in (
+            db.query(AllergenFoodAssociation.food_id)
+            .join(
+                UserAllergenAssociation,
+                UserAllergenAssociation.allergen_id == AllergenFoodAssociation.allergen_id,
+            )
+            .filter(UserAllergenAssociation.user_id == user_id)
+            .filter(AllergenFoodAssociation.food_id.in_(food_ids))
+            .all()
+        )
+    }
+
+    nutrients_by_food: Dict[int, List[Dict[str, Any]]] = {food_id: [] for food_id in food_ids}
+    for nutrient, assoc in (
+        db.query(Nutrient, FoodNutrientAssociation)
+        .join(FoodNutrientAssociation, FoodNutrientAssociation.nutrient_id == Nutrient.id)
+        .filter(FoodNutrientAssociation.food_id.in_(food_ids))
+        .order_by(FoodNutrientAssociation.food_id, Nutrient.id)
+        .all()
+    ):
+        nutrients_by_food[assoc.food_id].append({
+            "id": nutrient.id,
+            "name": nutrient.name,
+            "amount": assoc.amount,
+            "unit": nutrient.unit,
+            "calories_per_unit": nutrient.calories_per_unit,
+        })
+
+    return [
+        {
+            "id": food.id,
+            "name": food.name,
+            "category_id": food.category_id,
+            "brand_id": food.brand_id,
+            "nutrients": nutrients_by_food[food.id],
+            "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
+            "user_allergic": food.id in allergic_food_ids,
+            "description": food.description,
+            "model_label": food.model_label,
+            "created_by_user": food.user_id is not None,
+        }
+        for food in foods
+    ]
 
 
 def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
@@ -185,9 +260,11 @@ def get_food_nutrients(db: Session, food_id: int) -> List[Any]:
     )
 
 
-def calculate_meal_totals(db: Session, meal: "PostCreateMealBodyRequest"):
+def calculate_meal_totals(db: Session, meal: "PostCreateMealBodyRequest", user_id: int):
     """Validates the meal foods/weights and returns (foods, total_calories, total_nutrients),
-    scaling each food's per-100g nutrient amounts to its consumed weight."""
+    scaling each food's per-100g nutrient amounts to its consumed weight.
+
+    Only global foods and foods created by the meal's user are accepted."""
 
     if not meal.list_foods_ids:
         raise HTTPException(status_code=400, detail="At least one food ID must be provided")
@@ -206,7 +283,7 @@ def calculate_meal_totals(db: Session, meal: "PostCreateMealBodyRequest"):
     foods: List[Food] = []
 
     for food_id, food_weight in zip(meal.list_foods_ids, meal.list_foods_weights):
-        food = db.query(Food).filter(Food.id == food_id).first()
+        food = get_visible_food(db, food_id, user_id)
 
         if food is None:
             raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
@@ -244,170 +321,116 @@ def calculate_meal_totals(db: Session, meal: "PostCreateMealBodyRequest"):
 
 @router.get("/foods")
 def list_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
-    """Lista alimentos e informa se o usuario e alergico a cada um."""
+    """Lista os alimentos globais e os criados pelo usuario (estes por ultimo),
+    informando se o usuario e alergico a cada um."""
 
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
+    if db.query(User).filter(User.id == user_id).first() is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    query = db.query(Food)
+    query = db.query(Food).filter(visible_to_user(user_id))
+    if name:
+        query = query.filter(Food.name.ilike(f"%{name}%"))
+
+    foods = query.order_by(Food.user_id.is_not(None), Food.id).all()
+    return serialize_foods(db, foods, user_id)
+
+
+@router.get("/foods/created")
+def list_created_foods(db: DbDependency, user_id: int, name: Optional[str] = None):
+    """Lista os alimentos criados pelo usuário e informa se ele e alergico a cada um."""
+
+    if db.query(User).filter(User.id == user_id).first() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    query = db.query(Food).filter(Food.user_id == user_id)
     if name:
         query = query.filter(Food.name.ilike(f"%{name}%"))
 
     foods = query.order_by(Food.id).all()
+    return serialize_foods(db, foods, user_id)
 
-    allergic_food_ids = {
-        food_id
-        for (food_id,) in (
-            db.query(AllergenFoodAssociation.food_id)
-            .join(
-                UserAllergenAssociation,
-                UserAllergenAssociation.allergen_id == AllergenFoodAssociation.allergen_id,
+
+def set_food_associations(db: Session, food_id: int, body: PostCreatedFoodBodyRequest):
+    """(Re)cria as associacoes de alergenos e nutrientes de um alimento."""
+    db.query(FoodNutrientAssociation).filter(FoodNutrientAssociation.food_id == food_id).delete()
+    db.query(AllergenFoodAssociation).filter(AllergenFoodAssociation.food_id == food_id).delete()
+
+    for allergen_id in dict.fromkeys(body.allergen_ids):
+        allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
+
+        if allergen is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Allergen with id '{allergen_id}' not found",
             )
-            .filter(UserAllergenAssociation.user_id == user_id)
-            .all()
-        )
-    }
 
-    return [
-        {
-            "id": food.id,
-            "name": food.name,
-            "category_id": food.category_id,
-            "brand_id": food.brand_id,
-            "nutrients": [
-                {
-                    "id": nutrient.id,
-                    "name": nutrient.name,
-                    "amount": assoc.amount,
-                    "unit": nutrient.unit,
-                    "calories_per_unit": nutrient.calories_per_unit,
-                }
-                for nutrient, assoc in (
-                    db.query(Nutrient, FoodNutrientAssociation)
-                    .join(FoodNutrientAssociation, FoodNutrientAssociation.nutrient_id == Nutrient.id)
-                    .filter(FoodNutrientAssociation.food_id == food.id)
-                    .all()
-                )
-            ],
-            "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
-            "user_allergic": food.id in allergic_food_ids,
-            "description": food.description
-        }
-        for food in foods
-    ]
+        db.add(AllergenFoodAssociation(food_id=food_id, allergen_id=allergen.id))
 
+    nutrient_ids = set()
+    for nutrient_item in body.nutrients:
+        nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
 
-@router.get("/foods/{food_id}")
-def list_created_foods(food_id: int, db: DbDependency, user_id: int):
-    """Retorna um alimento criado pelo usuário e informa se o usuario e alergico a ele."""
-
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if db_user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    created_food = (
-        db.query(CreatedFood)
-        .filter(CreatedFood.id == food_id)
-        .filter(CreatedFood.user_id == user_id)
-        .first()
-    )
-    if created_food is None:
-        raise HTTPException(status_code=404, detail="Created food not found")
-
-    allergic_food_ids = {
-        food_id
-        for (food_id,) in (
-            db.query(CreatedFoodAllergenAssociation.created_food_id)
-            .join(
-                UserAllergenAssociation,
-                UserAllergenAssociation.allergen_id == CreatedFoodAllergenAssociation.allergen_id,
+        if nutrient is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nutrient '{nutrient_item.id}' not found",
             )
-            .filter(UserAllergenAssociation.user_id == user_id)
-            .all()
-        )
-    }
 
-    return {
-        "id": created_food.id,
-        "name": created_food.name,
-        "category_id": created_food.category_id,
-        "brand_id": created_food.brand_id,
-        "nutrients": [
-            {
-                "id": nutrient.id,
-                "name": nutrient.name,
-                "amount": assoc.amount,
-                "unit": nutrient.unit,
-                "calories_per_unit": nutrient.calories_per_unit,
-            }
-            for nutrient, assoc in (
-                db.query(Nutrient, CreatedFoodNutrientAssociation)
-                .join(CreatedFoodNutrientAssociation, CreatedFoodNutrientAssociation.nutrient_id == Nutrient.id)
-                .filter(CreatedFoodNutrientAssociation.created_food_id == created_food.id)
-                .all()
+        if nutrient.id in nutrient_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nutrient '{nutrient_item.id}' informed more than once",
             )
-        ],
-        "image": f"{BASE_URL}/images/alimentos/{created_food.image_url}" if created_food.image_url else None,
-        "user_allergic": created_food.id in allergic_food_ids,
-        "description": created_food.description
-    }
+        nutrient_ids.add(nutrient.id)
+
+        db.add(FoodNutrientAssociation(food_id=food_id, nutrient_id=nutrient.id, amount=nutrient_item.amount))
+
+
+def get_user_food_for_change(db: Session, food_id: int, user_id: int) -> Food:
+    """Busca um alimento que o usuario pode editar/excluir (somente os criados por ele)."""
+    food = db.query(Food).filter(Food.id == food_id).first()
+
+    if food is None:
+        raise HTTPException(status_code=404, detail="Food not found")
+
+    if food.user_id is None:
+        raise HTTPException(status_code=403, detail="Global foods cannot be changed")
+
+    if food.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You do not have permission to change this food")
+
+    return food
 
 
 @router.post("/foods")
 def create_food(body: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
-    """Cadastra um novo alimento com seus nutrientes."""
+    """Cadastra um novo alimento do usuario com seus nutrientes."""
     try:
         if db.query(User).filter(User.id == user_id).first() is None:
             raise HTTPException(status_code=404, detail="User not found")
 
-        existing = db.query(CreatedFood).filter(CreatedFood.name.ilike(body.name)).first()
+        existing = (
+            db.query(Food)
+            .filter(Food.user_id == user_id)
+            .filter(func.lower(Food.name) == body.name.strip().lower())
+            .first()
+        )
 
         if existing is not None:
             raise HTTPException(status_code=400, detail="Food already exists")
 
-        # Create food with only column fields
-        new_food = CreatedFood(
-            name=body.name,
-            user_id=user_id,
+        new_food = Food(
+            name=body.name.strip(),
             category_id=body.category_id,
             brand_id=body.brand_id,
+            model_label=build_model_label(body.name, body.model_label),
+            user_id=user_id,
         )
 
         db.add(new_food)
         db.flush()
 
-        for allergen_id in body.allergen_ids:
-            allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
-
-            if allergen is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Allergen with id '{allergen_id}' not found",
-                )
-
-            assoc = CreatedFoodAllergenAssociation(
-                allergen_id=allergen.id,
-                created_food_id=new_food.id,
-            )
-            db.add(assoc)
-
-        # create association mapped instances
-        for nutrient_item in body.nutrients:
-            nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
-
-            if nutrient is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Nutrient '{nutrient_item.id}' not found",
-                )
-
-            assoc = CreatedFoodNutrientAssociation(
-                created_food_id=new_food.id,
-                nutrient_id=nutrient.id,
-                amount=nutrient_item.amount,
-            )
-            db.add(assoc)
+        set_food_associations(db, new_food.id, body)
 
         db.commit()
         db.refresh(new_food)
@@ -431,62 +454,26 @@ def create_food(body: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int
 
 @router.patch("/foods/{food_id}")
 def update_food(food_id: int, food: PostCreatedFoodBodyRequest, db: DbDependency, user_id: int):
-    """Atualiza um alimento existente com seus nutrientes."""
+    """Atualiza um alimento criado pelo usuario com seus nutrientes."""
     try:
-        existing_food = db.query(CreatedFood).filter(CreatedFood.id == food_id).first()
+        existing_food = get_user_food_for_change(db, food_id, user_id)
 
-        if existing_food is None:
-            raise HTTPException(status_code=404, detail="Food not found")
+        duplicate = (
+            db.query(Food)
+            .filter(Food.user_id == user_id)
+            .filter(Food.id != food_id)
+            .filter(func.lower(Food.name) == food.name.strip().lower())
+            .first()
+        )
+        if duplicate is not None:
+            raise HTTPException(status_code=400, detail="Food already exists")
 
-        if existing_food.user_id != user_id:
-            raise HTTPException(status_code=403, detail="You do not have permission to update this food")
-
-        # Update food fields
-        existing_food.name = food.name
+        existing_food.name = food.name.strip()
         existing_food.category_id = food.category_id
         existing_food.brand_id = food.brand_id
+        existing_food.model_label = build_model_label(food.name, food.model_label)
 
-        # Clear existing associations
-        db.query(CreatedFoodNutrientAssociation).filter(
-            CreatedFoodNutrientAssociation.created_food_id == food_id
-        ).delete()
-
-        db.query(CreatedFoodAllergenAssociation).filter(
-            CreatedFoodAllergenAssociation.created_food_id == food_id
-        ).delete()
-
-        # Create new associations for allergens
-        for allergen_id in food.allergen_ids:
-            allergen = db.query(Allergen).filter(Allergen.id == allergen_id).first()
-
-            if allergen is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Allergen with id '{allergen_id}' not found",
-                )
-
-            assoc = CreatedFoodAllergenAssociation(
-                allergen_id=allergen.id,
-                created_food_id=existing_food.id,
-            )
-            db.add(assoc)
-
-        # Create new associations for nutrients
-        for nutrient_item in food.nutrients:
-            nutrient = get_nutrient_by_identifier(db, nutrient_item.id)
-
-            if nutrient is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Nutrient '{nutrient_item.id}' not found",
-                )
-
-            assoc = CreatedFoodNutrientAssociation(
-                created_food_id=existing_food.id,
-                nutrient_id=nutrient.id,
-                amount=nutrient_item.amount,
-            )
-            db.add(assoc)
+        set_food_associations(db, existing_food.id, food)
 
         db.commit()
         db.refresh(existing_food)
@@ -510,26 +497,24 @@ def update_food(food_id: int, food: PostCreatedFoodBodyRequest, db: DbDependency
 
 @router.delete("/foods/{food_id}")
 def delete_food(food_id: int, db: DbDependency, user_id: int):
-    """Deleta um alimento existente."""
+    """Deleta um alimento criado pelo usuario.
+
+    Alimentos usados em refeicoes ou dietas nao sao excluidos (409), para nao
+    alterar o historico dessas refeicoes/dietas.
+    """
     try:
-        existing_food = db.query(CreatedFood).filter(CreatedFood.id == food_id).first()
+        existing_food = get_user_food_for_change(db, food_id, user_id)
 
-        if existing_food is None:
-            raise HTTPException(status_code=404, detail="Food not found")
+        in_use = (
+            db.query(MealFoodAssociation).filter(MealFoodAssociation.food_id == food_id).first()
+            or db.query(DietFoodAssociation).filter(DietFoodAssociation.food_id == food_id).first()
+        )
+        if in_use is not None:
+            raise HTTPException(status_code=409, detail="Food is used in meals or diets and cannot be deleted")
 
-        if existing_food.user_id != user_id:
-            raise HTTPException(status_code=403, detail="You do not have permission to delete this food")
+        db.query(FoodNutrientAssociation).filter(FoodNutrientAssociation.food_id == food_id).delete()
+        db.query(AllergenFoodAssociation).filter(AllergenFoodAssociation.food_id == food_id).delete()
 
-        # Delete associations first
-        db.query(CreatedFoodNutrientAssociation).filter(
-            CreatedFoodNutrientAssociation.created_food_id == food_id
-        ).delete()
-
-        db.query(CreatedFoodAllergenAssociation).filter(
-            CreatedFoodAllergenAssociation.created_food_id == food_id
-        ).delete()
-
-        # Delete the food itself
         db.delete(existing_food)
         db.commit()
 
@@ -695,6 +680,7 @@ def list_user_meals(user_id: int, db: DbDependency):
                     "brand_id": food.brand_id,
                     "weight_g": food_weight_g,
                     "image": f"{BASE_URL}/images/alimentos/{food.image_url}" if food.image_url else None,
+                    "created_by_user": food.user_id is not None,
                 }
                 for food, food_weight_g in foods_with_weights
             ],
@@ -716,7 +702,7 @@ def create_meal(meal: PostCreateMealBodyRequest, db: DbDependency, user_id: int)
     if user is None:
         raise HTTPException(status_code=400, detail=f"User_id: {user_id} dont exist")
 
-    foods, total_calories, _ = calculate_meal_totals(db, meal)
+    foods, total_calories, _ = calculate_meal_totals(db, meal, user.id)
 
     total_weight = sum(meal.list_foods_weights)
 
@@ -764,7 +750,7 @@ def update_meal(meal_id: int, user_id: int, meal: PostCreateMealBodyRequest, db:
         raise HTTPException(status_code=400, detail="Invalid meal weight")
 
     # Validate and recalculate before touching the database
-    foods, total_calories, _ = calculate_meal_totals(db, meal)
+    foods, total_calories, _ = calculate_meal_totals(db, meal, user_id)
 
     updated_meal.name = meal.name
     updated_meal.consumed_at = meal.consumed_at

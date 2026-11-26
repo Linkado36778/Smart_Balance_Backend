@@ -76,7 +76,7 @@ def test_openapi_lists_all_routes(client, app):
 
 
 def test_static_food_images_exist_for_every_food(client, db):
-    foods = db.query(Food).all()
+    foods = db.query(Food).filter(Food.user_id.is_(None)).all()  # alimentos globais
     assert len(foods) == 25
     for food in foods:
         assert food.image_url, food.name

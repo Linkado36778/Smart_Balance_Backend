@@ -62,8 +62,6 @@ def post_image(client, user_id, content, filename="img.jpg", content_type="image
 
 
 def assert_recognition_payload(recognition, db):
-    from SiglIp.test_01_Siglip import LABELS
-
     assert recognition["model"] == "SigLIP"
     assert recognition["language"] == "EN/PT-BR"
     predictions = recognition["predictions"]
@@ -71,22 +69,107 @@ def assert_recognition_payload(recognition, db):
     confidences = [p["confidence"] for p in predictions]
     assert confidences == sorted(confidences, reverse=True)
     assert all(0.0 <= c <= 1.0 for c in confidences) and sum(confidences) <= 1.0 + 1e-6
-    labels = {label["db_name"]: label["model_label"] for label in LABELS}
-    assert all(labels[p["label"]] == p["model_label"] for p in predictions)
+    for prediction in predictions:
+        db_food = db.get(Food, prediction["food_id"])
+        assert (db_food.user_id is None) == (prediction["source"] == "food")
+        assert db_food is not None and db_food.name == prediction["label"]
+        if prediction["source"] == "food":
+            assert db_food.model_label == prediction["model_label"]
     assert recognition["confidence"] == predictions[0]["confidence"]
     food = recognition["recognized_food"]
     assert food["food_name"] == predictions[0]["label"]
+    assert food["source"] == predictions[0]["source"] and food["food_id"] == predictions[0]["food_id"]
     db_food = db.get(Food, food["food_id"])
     assert db_food is not None and db_food.name == food["food_name"]
     assert food["category_id"] == db_food.category_id and food["brand_id"] == db_food.brand_id
 
 
-def test_every_label_maps_to_a_database_food(db):
-    from SiglIp.test_01_Siglip import LABELS
+def test_every_curated_label_is_seeded_in_the_database(db):
+    from shared.database import DEFAULT_FOOD_MODEL_LABELS
 
-    names = {f.name for f in db.query(Food).all()}
-    missing = [label["db_name"] for label in LABELS if label["db_name"] not in names]
-    assert missing == []
+    seeded = {f.name: f.model_label for f in db.query(Food).filter(Food.user_id.is_(None), Food.model_label.isnot(None))}
+    assert seeded == DEFAULT_FOOD_MODEL_LABELS
+
+
+def create_food(client, user_id, name, model_label=None, nutrients=None):
+    body = {"name": name, "category_id": 1, "nutrients": nutrients or [{"id": 1, "amount": 10.0}]}
+    if model_label is not None:
+        body["model_label"] = model_label
+    response = client.post("/foods", params={"user_id": user_id}, json=body)
+    assert response.status_code == 200, response.text
+    return response
+
+
+class TestRecognitionCandidates:
+    """Candidatos do SigLIP: Food global com prompt + Food do proprio usuario (sem modelo real)."""
+
+    def test_created_foods_only_for_their_owner(self, client, make_user, db):
+        from SiglIp.test_01_Siglip import get_recognition_candidates
+
+        owner, other = make_user(), make_user()
+        create_food(client, owner["id"], "Pizza caseira de teste", model_label="  an image of a homemade pizza  ")
+        create_food(client, owner["id"], "Bolo de cenoura de teste")
+
+        owner_candidates = get_recognition_candidates(db, owner["id"])
+        created = [c for c in owner_candidates if c["source"] == "created_food"]
+        assert [(c["name"], c["model_label"]) for c in created] == [
+            ("Pizza caseira de teste", "an image of a homemade pizza"),
+            ("Bolo de cenoura de teste", "an image of Bolo de cenoura de teste"),  # gerado pelo nome
+        ]
+
+        other_candidates = get_recognition_candidates(db, other["id"])
+        assert not [c for c in other_candidates if c["source"] == "created_food"]
+
+        global_names = {c["name"] for c in other_candidates}
+        assert global_names == {f.name for f in db.query(Food).filter(Food.user_id.is_(None), Food.model_label.isnot(None))}
+
+    def test_blank_model_label_is_generated_and_saved(self, client, make_user, db):
+        user = make_user()
+        for name, model_label in (("Sopa de teste", None), ("Quiche de teste", ""), ("Torta de teste", "   ")):
+            create_food(client, user["id"], name, model_label=model_label)
+            food = db.query(Food).filter_by(user_id=user["id"], name=name).one()
+            assert food.model_label == f"an image of {name}"
+
+    def test_update_changes_model_label(self, client, make_user, db):
+        user = make_user()
+        create_food(client, user["id"], "Lasanha de teste")
+        food = db.query(Food).filter_by(user_id=user["id"], name="Lasanha de teste").one()
+        assert food.model_label == "an image of Lasanha de teste"
+
+        response = client.patch(f"/foods/{food.id}", params={"user_id": user["id"]},
+                                json={"name": "Lasanha de teste", "model_label": "an image of lasagna"})
+        assert response.status_code == 200, response.text
+        db.expire_all()
+        assert db.get(Food, food.id).model_label == "an image of lasagna"
+
+        # sem prompt, volta a ser gerado a partir do (novo) nome
+        response = client.patch(f"/foods/{food.id}", params={"user_id": user["id"]},
+                                json={"name": "Lasanha bolonhesa de teste", "model_label": ""})
+        assert response.status_code == 200, response.text
+        db.expire_all()
+        assert db.get(Food, food.id).model_label == "an image of Lasanha bolonhesa de teste"
+
+    def test_recognizes_created_food_with_its_nutrients(self, client, make_user, db, monkeypatch):
+        """Quando o prompt de um alimento criado vence, o retorno usa esse alimento e seus nutrientes."""
+        import torch
+        import SiglIp.test_01_Siglip as siglip
+
+        user = make_user()
+        create_food(client, user["id"], "Tapioca de teste", model_label="an image of tapioca",
+                    nutrients=[{"id": 1, "amount": 2.0}, {"id": 2, "amount": 50.0}])
+
+        def fake_scores(image, texts):
+            scores = torch.zeros(len(texts))
+            scores[texts.index("an image of tapioca")] = 1.0
+            return scores
+
+        monkeypatch.setattr(siglip, "_score_candidates", fake_scores)
+        response = post_image(client, user["id"], image_bytes(Image.new("RGB", (64, 64))), weight=200)
+        assert response.status_code == 200, response.text
+        food = response.json()["items"][0]["recognized_food"]["recognized_food"]
+        created = db.query(Food).filter_by(user_id=user["id"], name="Tapioca de teste").one()
+        assert food["source"] == "created_food" and food["food_id"] == created.id
+        assert {n["nutrient_id"]: n["amount"] for n in food["nutrients"]} == pytest.approx({1: 4.0, 2: 100.0})
 
 
 @requires_model

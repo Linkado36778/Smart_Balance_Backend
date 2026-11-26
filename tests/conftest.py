@@ -133,6 +133,10 @@ def test_database():
     """Recria o schema do banco de testes, carrega os dados de referencia e isola o cwd."""
     original_cwd = os.getcwd()
     os.chdir(WORK_DIR)
+    # Tabelas antigas (fora do metadata) que bloqueariam o drop_all por FK
+    with engine.begin() as conn:
+        for table in ("CreatedFood_Nutrient", "CreatedFood_Allergen", "CreatedFood"):
+            conn.execute(text(f'DROP TABLE IF EXISTS "{table}" CASCADE'))
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     _seed_reference_data()

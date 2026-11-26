@@ -20,6 +20,7 @@ from pwdlib import PasswordHash
 from shared.database import get_db
 from application.models.application_models import Allergen, Balance, Diet, DietFoodAssociation, Food, User, Nutricionist, UserAllergenAssociation, Pairing, UserBalanceAssociation
 from application.models.return_models import ReturnModel, ReturnSuccessUserModel
+from application.controller.food_controller import get_visible_food
 
 BASE_URL = os.environ.get("BASE_URL") or "http://localhost:8000"
 QR_CODES_DIR = Path(__file__).resolve().parents[2] / "qr_codes"
@@ -397,43 +398,50 @@ def login_nutricionist(nutricionist_email: str, nutricionist_password: str, db: 
     return serialize_nutricionist(db_nutricionist)
 
 @router.post("/link_user_nutricionist")
-def link_user_nutricionist(user_id: int, nutricionist_id: int, db: DbDependency):
+def link_user_nutricionist(user_id: int, nutricionist_CRN: str, db: DbDependency):
     """Link a user to a nutricionist."""
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first()
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.crn == nutricionist_CRN).first()
     if db_nutricionist is None:
         raise HTTPException(status_code=404, detail="Nutricionist not found")
 
-    db_user.nutricionist_id = nutricionist_id
+    db_user.nutricionist_id = db_nutricionist.id
     db.commit()
     db.refresh(db_user)
     return ReturnModel(
         message = "User linked to nutricionist successfully",
         data = {
             "user_id": db_user.id,
-            "nutricionist_id": db_user.nutricionist_id
+            "nutricionist_id": db_user.nutricionist_id,
+            "nutricionist_CRN": db_nutricionist.crn
         },
         success = True
     )
 
 @router.patch("/unlink_user_nutricionist/{user_id}")
-def unlink_user_nutricionist(user_id: int, db: DbDependency):
+def unlink_user_nutricionist(user_id: int, nutricionist_CRN: str, db: DbDependency):
     """Unlink a user from their nutricionist."""
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    db_user.nutricionist_id = None
+    db_nutricionist = db.query(Nutricionist).filter(Nutricionist.crn == nutricionist_CRN).first()
+    if db_nutricionist is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+
+    db_user.nutricionist_id = db_nutricionist.id
+    
     db.commit()
     db.refresh(db_user)
     return ReturnModel(
         message = "User unlinked from nutricionist successfully",
         data = {
             "user_id": db_user.id,
-            "nutricionist_id": db_user.nutricionist_id
+            "nutricionist_id": db_user.nutricionist_id,
+            "nutricionist_CRN": db_nutricionist.crn
         },
         success = True
     )
@@ -588,8 +596,8 @@ def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: Post
     foods: List[Food] = []
     
     for food_id in diet.list_foods_ids:
-        food = db.query(Food).filter(Food.id == food_id).first()
-        
+        food = get_visible_food(db, food_id, diet.user_id)
+
         if food is None:
             raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
                 
@@ -647,7 +655,7 @@ def update_diet(diet_id: int, diet: PostCreateDietBodyRequest, db: DbDependency)
 
     # Add new food associations
     for food_id in diet.list_foods_ids:
-        food = db.query(Food).filter(Food.id == food_id).first()
+        food = get_visible_food(db, food_id, db_diet.user_id)
         if food is None:
             raise HTTPException(status_code=400, detail=f"Food_id: {food_id} does not exist")
         association = DietFoodAssociation(
