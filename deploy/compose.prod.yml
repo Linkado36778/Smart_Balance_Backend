@@ -1,0 +1,68 @@
+# Stack de PRODUCAO na VPS (Smart Balance backend + PostgreSQL proprio).
+#
+# Fica em /opt/smart-balance/compose.prod.yml; o .env (chmod 600) fica ao lado.
+# A imagem e construida pelo deploy.sh e marcada com IMAGE_TAG (rollback =
+# voltar IMAGE_TAG para a tag anterior e subir de novo).
+#
+# Rede: a API escuta apenas em 127.0.0.1:8000 (acesso externo somente via
+# Nginx/HTTPS). O PostgreSQL nao publica porta nenhuma no host.
+
+name: smart-balance
+
+services:
+  api:
+    image: sb-backend:${IMAGE_TAG:?defina IMAGE_TAG}
+    container_name: sb-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      HF_HOME: /models/hf
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - sb-hf-cache:/models/hf               # pesos do SigLIP (persistentes)
+      - sb-static-images:/app/static/images  # imagens enviadas via /upload-image
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    mem_limit: 4g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  db:
+    image: postgres:18-alpine
+    container_name: sb-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      # postgres 18+: o volume e montado em /var/lib/postgresql
+      - sb-postgres-18-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  sb-postgres-18-data:
+  sb-hf-cache:
+  sb-static-images:
