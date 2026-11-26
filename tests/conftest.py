@@ -213,13 +213,14 @@ def make_nutricionist(client, db):
             "email": unique_email("nutri"),
             "password": TEST_PASSWORD,
             "phone": "13999990000",
-            "crn": "CRN-3 12345",
+            # CRN unico: o vinculo usuario/nutricionista e feito pelo CRN
+            "crn": f"CRN-3 {uuid.uuid4().int % 100000:05d}",
         }
         payload.update(overrides)
         response = client.post("/nutricionist", json=payload)
         assert response.status_code == 200, response.text
         nutri = db.query(Nutricionist).filter(Nutricionist.email == payload["email"]).one()
-        return {"id": nutri.id, "email": payload["email"], "_password": payload["password"]}
+        return {"id": nutri.id, "email": payload["email"], "crn": payload["crn"], "_password": payload["password"]}
 
     return _make
 

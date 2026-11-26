@@ -117,6 +117,7 @@ class Nutricionist(Base):
     phone: Mapped[str] = mapped_column(index=True)
     email: Mapped[str] = mapped_column(index=True)
     crn: Mapped[str] = mapped_column(index=True)
+    full_name: Mapped[Optional[str]] = mapped_column(default=None)
 
 
 class User(Base):
@@ -136,6 +137,7 @@ class User(Base):
     nutricionist_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("Nutricionist.id"), index=True, default=None
     )
+    full_name: Mapped[Optional[str]] = mapped_column(default=None)
 
 
 class Meal(Base):

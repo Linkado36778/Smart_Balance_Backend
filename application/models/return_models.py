@@ -46,6 +46,9 @@ class ReturnSuccessUserModel():
     height_m: float
     sex: str
     created_at: datetime
+    full_name: Optional[str] = None
+    has_paired_scale: bool = False
+    balance_id: Optional[int] = None
 
 #region Recognition
 

@@ -19,7 +19,7 @@ def test_user_nutricionist_diet_flow(client, db):
         "sex": "F", "password": TEST_PASSWORD, "is_active": True,
     }).json()["data"]
     assert client.post("/auth/commun_user", json={"email": user_email, "password": TEST_PASSWORD}).status_code == 200
-    assert client.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_id": nutri["id"]}).status_code == 200
+    assert client.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_CRN": nutri["crn"]}).status_code == 200
     assert [u["id"] for u in client.get(f"/list_user_data_by_nutricionist/{nutri['id']}").json()] == [user["id"]]
     diet = client.post(f"/create_diet/{nutri['id']}/{user['id']}", json={
         "name": "Plano", "user_id": user["id"], "nutricionist_id": nutri["id"], "list_foods_ids": [1, 2, 3], "kcal_goal": 2000,

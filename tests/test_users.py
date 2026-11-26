@@ -30,7 +30,7 @@ class TestCreateUser:
         body = response.json()
         assert body["success"] is True
         data = body["data"]
-        assert set(data) == {"id", "email", "birthdate", "weight_kg", "height_m", "sex", "created_at", "is_active"}
+        assert set(data) == {"id", "email", "full_name", "birthdate", "weight_kg", "height_m", "sex", "created_at", "is_active"}
         assert isinstance(data["id"], int)
         assert data["email"] == payload["email"]
         assert data["weight_kg"] == 72.5 and data["height_m"] == 1.78
@@ -204,7 +204,7 @@ class TestNutricionist:
         payload = nutri_payload(phone="13888887777", crn="CRN-4 54321")
         response = client.patch(f"/update_Nutricionist/{nutri['id']}", json=payload)
         assert response.status_code == 200
-        assert response.json()["data"] == {"id": nutri["id"], "email": payload["email"], "phone": "13888887777", "crn": "CRN-4 54321"}
+        assert response.json()["data"] == {"id": nutri["id"], "email": payload["email"], "full_name": None, "phone": "13888887777", "crn": "CRN-4 54321"}
         row = db.get(Nutricionist, nutri["id"])
         assert row.phone == "13888887777"
         assert client.patch("/update_Nutricionist/999999", json=nutri_payload()).status_code == 404
@@ -213,7 +213,7 @@ class TestNutricionist:
         nutri = make_nutricionist()
         assert client.patch(f"/update_Nutricionist/{nutri['id']}", json=nutri_payload(crn="invalido")).status_code == 400
         assert client.patch(f"/update_Nutricionist/{nutri['id']}", json=nutri_payload(email="invalido")).status_code == 400
-        assert db.get(Nutricionist, nutri["id"]).crn == "CRN-3 12345"
+        assert db.get(Nutricionist, nutri["id"]).crn == nutri["crn"]
 
     def test_delete(self, client, make_nutricionist, db):
         nutri = make_nutricionist()
@@ -240,11 +240,13 @@ class TestNutricionist:
 
 
 class TestLinkUserNutricionist:
+    """Contrato atual (commit e5349fd): o vinculo e feito pelo CRN do nutricionista."""
+
     def test_link_unlink_and_list(self, client, make_user, make_nutricionist, db):
         user, nutri = make_user(), make_nutricionist()
-        response = client.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_id": nutri["id"]})
+        response = client.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_CRN": nutri["crn"]})
         assert response.status_code == 200
-        assert response.json()["data"] == {"user_id": user["id"], "nutricionist_id": nutri["id"]}
+        assert response.json()["data"] == {"user_id": user["id"], "nutricionist_id": nutri["id"], "nutricionist_CRN": nutri["crn"]}
         assert db.get(User, user["id"]).nutricionist_id == nutri["id"]
 
         listing = client.get(f"/list_user_data_by_nutricionist/{nutri['id']}")
@@ -252,7 +254,7 @@ class TestLinkUserNutricionist:
         assert [u["id"] for u in listing.json()] == [user["id"]]
         assert all("password" not in u for u in listing.json())
 
-        response = client.patch(f"/unlink_user_nutricionist/{user['id']}")
+        response = client.patch(f"/unlink_user_nutricionist/{user['id']}", params={"nutricionist_CRN": nutri["crn"]})
         assert response.status_code == 200
         assert response.json()["data"]["nutricionist_id"] is None
         db.expunge_all()
@@ -260,8 +262,11 @@ class TestLinkUserNutricionist:
         assert client.get(f"/list_user_data_by_nutricionist/{nutri['id']}").json() == []
 
     def test_link_errors(self, client, make_user, make_nutricionist):
-        user, nutri = make_user(), make_nutricionist()
-        assert client.post("/link_user_nutricionist", params={"user_id": 999999, "nutricionist_id": nutri["id"]}).status_code == 404
-        assert client.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_id": 999999}).status_code == 404
+        user, nutri, other = make_user(), make_nutricionist(), make_nutricionist()
+        assert client.post("/link_user_nutricionist", params={"user_id": 999999, "nutricionist_CRN": nutri["crn"]}).status_code == 404
+        assert client.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_CRN": "CRN-0 00000"}).status_code == 404
         assert client.post("/link_user_nutricionist", params={"user_id": user["id"]}).status_code == 422
-        assert client.patch("/unlink_user_nutricionist/999999").status_code == 404
+        assert client.patch("/unlink_user_nutricionist/999999", params={"nutricionist_CRN": nutri["crn"]}).status_code == 404
+        # desvincular de um nutricionista ao qual o usuario nao esta vinculado
+        assert client.post("/link_user_nutricionist", params={"user_id": user["id"], "nutricionist_CRN": nutri["crn"]}).status_code == 200
+        assert client.patch(f"/unlink_user_nutricionist/{user['id']}", params={"nutricionist_CRN": other["crn"]}).status_code == 400

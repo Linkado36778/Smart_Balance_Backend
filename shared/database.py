@@ -407,6 +407,52 @@ def seed_food_model_labels():
     finally:
         db.close()
 
+DIET_GOAL_COLUMNS = ("kcal_goal", "fat_goal", "carb_goal", "protein_goal")
+
+def ensure_diet_schema():
+    """Ensures that Diet has the nutritional goal columns of the current model.
+
+    Databases created from smart-balance.sql have the legacy column
+    goal VARCHAR NOT NULL and none of kcal_goal/fat_goal/carb_goal/protein_goal.
+    create_all() never alters existing tables, so every POST /create_diet
+    failed with UndefinedColumn (HTTP 500). The missing columns are added
+    (existing rows keep NULL) and the legacy goal column is kept with its data,
+    only becoming nullable, because the model no longer fills it.
+    """
+    columns = {column["name"]: column for column in inspect(engine).get_columns("Diet")}
+    statements = [
+        f'ALTER TABLE "Diet" ADD COLUMN IF NOT EXISTS {name} FLOAT'
+        for name in DIET_GOAL_COLUMNS
+        if name not in columns
+    ]
+    if "goal" in columns and not columns["goal"]["nullable"] and engine.dialect.name == "postgresql":
+        statements.append('ALTER TABLE "Diet" ALTER COLUMN goal DROP NOT NULL')
+    if not statements:
+        return
+
+    with engine.begin() as connection:
+        for statement in statements:
+            if engine.dialect.name != "postgresql":
+                statement = statement.replace(" IF NOT EXISTS", "")
+            connection.execute(text(statement))
+
+def ensure_full_name_schema():
+    """Ensures that User and Nutricionist have the full_name column.
+
+    Neither table had any name column (no first_name/last_name/name), so there
+    is nothing to derive it from: existing rows keep NULL until the name is
+    informed through the create/update endpoints.
+    """
+    for table in ("User", "Nutricionist"):
+        columns = {column["name"] for column in inspect(engine).get_columns(table)}
+        if "full_name" in columns:
+            continue
+        statement = f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS full_name VARCHAR'
+        if engine.dialect.name != "postgresql":
+            statement = statement.replace(" IF NOT EXISTS", "")
+        with engine.begin() as connection:
+            connection.execute(text(statement))
+
 def ensure_food_nutrient_association_schema():
     """"Ensures that the Food_Nutrient association table has a composite primary key on (nutrient_id, food_id), adding it if necessary."""
     inspector = inspect(engine)
@@ -433,6 +479,8 @@ def initialize_database():
     ensure_pairing_schema()
     ensure_food_model_label_schema()
     ensure_food_user_schema()
+    ensure_diet_schema()
+    ensure_full_name_schema()
     migrate_created_foods_into_food()
     seed_categories()
     seed_nutrients()

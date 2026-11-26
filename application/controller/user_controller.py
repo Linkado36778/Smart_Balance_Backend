@@ -5,15 +5,17 @@ import re
 import secrets
 import hashlib
 import hmac
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, List, Optional
+from typing import Annotated, Dict, List, Optional
 from urllib.parse import urlencode
 
 import qrcode
 
 from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from pwdlib import PasswordHash
 
@@ -28,6 +30,7 @@ QR_CODES_DIR = Path(__file__).resolve().parents[2] / "qr_codes"
 #region Setup
 
 router = APIRouter(tags=["User"])
+logger = logging.getLogger("smart_balance")
 DbDependency = Annotated[Session, Depends(get_db)]
 password_hash = PasswordHash.recommended()
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -68,6 +71,17 @@ class PostCreateAllergenBodyRequest(BaseModel):
     """Base model for allergen creation."""
     name: str
 
+FULL_NAME_MAX_LENGTH = 150
+
+def clean_full_name(value: Optional[str]) -> Optional[str]:
+    """Normalize full_name: collapse whitespace, blank means absent."""
+    if value is None:
+        return None
+    value = " ".join(value.split())
+    if len(value) > FULL_NAME_MAX_LENGTH:
+        raise ValueError(f"full_name must have at most {FULL_NAME_MAX_LENGTH} characters")
+    return value or None
+
 class PostCreateUserBodyRequest(BaseModel):
     """Base model for user creation."""
     email: str
@@ -78,6 +92,13 @@ class PostCreateUserBodyRequest(BaseModel):
     password: str
     is_active: bool
     nutricionist_id: Optional[int] = None
+    # Opcional para manter compativel o app que ainda nao envia o nome
+    full_name: Optional[str] = None
+
+    @field_validator("full_name")
+    def validate_full_name(cls, value):
+        """Normalize the full name."""
+        return clean_full_name(value)
 
     @field_validator("birthdate")
     def parse_birthdate(cls, value):
@@ -95,6 +116,12 @@ class PostCreateNutricionistBodyRequest(BaseModel):
     password: str
     phone: str
     crn: str
+    full_name: Optional[str] = None
+
+    @field_validator("full_name")
+    def validate_full_name(cls, value):
+        """Normalize the full name."""
+        return clean_full_name(value)
 
 #region Helpers
 
@@ -104,11 +131,59 @@ def nutricionist_validate_format(nuricionist_crn: str):
         return True
     return False
 
-def serialize_user(user: User) -> dict:
+def get_paired_balances(db: Session, user_ids: List[int]) -> Dict[int, List[int]]:
+    """Active balances of each user, the current one first.
+
+    A pairing is active while its User_Balance row exists (unpairing deletes
+    the row). User_Balance has no timestamp, so the current balance is the one
+    of the most recent pairing (Pairing.used_at) still active; links without a
+    pairing record (legacy rows) come after, highest balance id first.
+    Duplicated legacy rows (User_Balance has no PK in old databases) are merged.
+    """
+    if not user_ids:
+        return {}
+
+    active: Dict[int, set] = {}
+    for user_id, balance_id in (
+        db.query(UserBalanceAssociation.user_id, UserBalanceAssociation.balance_id)
+        .filter(UserBalanceAssociation.user_id.in_(user_ids))
+        .distinct()
+        .all()
+    ):
+        active.setdefault(user_id, set()).add(balance_id)
+
+    if not active:
+        return {}
+
+    ordered: Dict[int, List[int]] = {user_id: [] for user_id in active}
+    for user_id, balance_id in (
+        db.query(Pairing.user_id, Pairing.balance_id)
+        .filter(Pairing.user_id.in_(list(active)))
+        .filter(Pairing.used_at.isnot(None))
+        .order_by(Pairing.used_at.desc(), Pairing.id.desc())
+        .all()
+    ):
+        if balance_id in active[user_id] and balance_id not in ordered[user_id]:
+            ordered[user_id].append(balance_id)
+
+    for user_id, balance_ids in active.items():
+        ordered[user_id].extend(sorted(balance_ids - set(ordered[user_id]), reverse=True))
+
+    return ordered
+
+def pairing_fields(balance_ids: Optional[List[int]]) -> dict:
+    """has_paired_scale / balance_id (current active balance or None)."""
+    return {
+        "has_paired_scale": bool(balance_ids),
+        "balance_id": balance_ids[0] if balance_ids else None,
+    }
+
+def serialize_user(user: User, balance_ids: Optional[List[int]] = None) -> dict:
     """Public representation of a user (never exposes the password hash)."""
     return {
         "id": user.id,
         "email": user.email,
+        "full_name": user.full_name,
         "birthdate": user.birthdate,
         "weight_kg": user.weight_kg,
         "height_m": user.height_m,
@@ -116,17 +191,47 @@ def serialize_user(user: User) -> dict:
         "created_at": user.created_at,
         "is_active": user.is_active,
         "nutricionist_id": user.nutricionist_id,
+        **pairing_fields(balance_ids),
     }
+
+def serialize_patient(user: User, balance_ids: Optional[List[int]] = None) -> dict:
+    """A nutricionist's patient: the user data plus user_id (same value as id)."""
+    return {**serialize_user(user, balance_ids), "user_id": user.id}
 
 def serialize_nutricionist(nutricionist: Nutricionist) -> dict:
     """Public representation of a nutricionist (never exposes the password hash)."""
     return {
         "id": nutricionist.id,
         "email": nutricionist.email,
+        "full_name": nutricionist.full_name,
         "phone": nutricionist.phone,
         "crn": nutricionist.crn,
         "created_at": nutricionist.created_at,
     }
+
+def serialize_diet(diet: Diet, food_ids: List[int]) -> dict:
+    """Diet with its goals and foods."""
+    return {
+        "id": diet.id,
+        "name": diet.name,
+        "user_id": diet.user_id,
+        "nutricionist_id": diet.nutricionist_id,
+        "kcal_goal": diet.kcal_goal,
+        "fat_goal": diet.fat_goal,
+        "carb_goal": diet.carb_goal,
+        "protein_goal": diet.protein_goal,
+        "list_foods_ids": food_ids,
+    }
+
+def resolve_diet_foods(db: Session, food_ids: List[int], user_id: int) -> List[Food]:
+    """Validates the diet foods (global or created by the patient), ignoring repeated ids."""
+    foods: List[Food] = []
+    for food_id in dict.fromkeys(food_ids):
+        food = get_visible_food(db, food_id, user_id)
+        if food is None:
+            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
+        foods.append(food)
+    return foods
 
 #region User
 
@@ -151,6 +256,7 @@ def create_user(body: PostCreateUserBodyRequest, db: DbDependency):
         password = password_hash.hash(body.password),
         is_active = body.is_active,
         nutricionist_id = body.nutricionist_id,
+        full_name = body.full_name,
     )
 
     if new_user is None:
@@ -168,6 +274,7 @@ def create_user(body: PostCreateUserBodyRequest, db: DbDependency):
         data = {
             "id": new_user.id,
             "email": new_user.email,
+            "full_name": new_user.full_name,
             "birthdate": new_user.birthdate,
             "weight_kg": new_user.weight_kg,
             "height_m": new_user.height_m,
@@ -199,6 +306,9 @@ def update_user(user_id: int, user: PostCreateUserBodyRequest, db: DbDependency)
     db_user.password = password_hash.hash(user.password)
     db_user.is_active = user.is_active
     db_user.nutricionist_id = user.nutricionist_id
+    # Clientes antigos nao enviam full_name: so altera quando o campo vier no corpo
+    if "full_name" in user.model_fields_set:
+        db_user.full_name = user.full_name
 
     db.commit()
     db.refresh(db_user)
@@ -207,6 +317,7 @@ def update_user(user_id: int, user: PostCreateUserBodyRequest, db: DbDependency)
         data={
             "id": db_user.id,
             "email": db_user.email,
+            "full_name": db_user.full_name,
             "birthdate": db_user.birthdate,
             "weight_kg": db_user.weight_kg,
             "height_m": db_user.height_m,
@@ -244,7 +355,9 @@ def get_user(user_id: int, db: DbDependency):
 
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
+    balance_ids = get_paired_balances(db, [user.id]).get(user.id)
+
     return ReturnModel(
         message = "User getted successfully",
         data = ReturnSuccessUserModel(
@@ -254,9 +367,37 @@ def get_user(user_id: int, db: DbDependency):
             weight_kg = user.weight_kg,
             height_m = user.height_m,
             sex = user.sex,
-            created_at = user.created_at
+            created_at = user.created_at,
+            full_name = user.full_name,
+            **pairing_fields(balance_ids),
         ),
         success = True
+    )
+
+@router.get("/user/{user_id}/balance")
+def get_user_balance(user_id: int, db: DbDependency):
+    """Active scale pairing of a user (User_Balance).
+
+    balance_id is the current balance (the most recently paired one still
+    linked); balance_ids lists every active link. Without pairing:
+    has_paired_scale=false and balance_id=null.
+    """
+    if db.query(User).filter(User.id == user_id).first() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    balance_ids = get_paired_balances(db, [user_id]).get(user_id) or []
+    fields = pairing_fields(balance_ids)
+    balance = db.get(Balance, fields["balance_id"]) if fields["balance_id"] is not None else None
+
+    return ReturnModel(
+        message="User balance getted successfully",
+        data={
+            "user_id": user_id,
+            **fields,
+            "balance_name": balance.name if balance else None,
+            "balance_ids": balance_ids,
+        },
+        success=True,
     )
 
 @router.get("/login_User/{user_email}/{user_password}")
@@ -267,7 +408,7 @@ def login_user(user_email: str, user_password: str, db: DbDependency):
         raise HTTPException(status_code=404, detail="User not found")
     if not password_hash.verify(user_password, db_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    return serialize_user(db_user)
+    return serialize_user(db_user, get_paired_balances(db, [db_user.id]).get(db_user.id))
 
 # Endpoint abaixo descontinuado, pois não é necessário para a funcionalidade atual do sistema.
 
@@ -307,7 +448,8 @@ def create_nutricionist(body: PostCreateNutricionistBodyRequest, db: DbDependenc
         email = body.email,
         password = password_hash.hash(body.password),
         phone = body.phone,
-        crn = body.crn
+        crn = body.crn,
+        full_name = body.full_name,
     )
 
     if not nutricionist_validate_format(body.crn):
@@ -357,6 +499,9 @@ def update_nutricionist(nutricionist_id: int, nutricionist: PostCreateNutricioni
     db_nutricionist.password = password_hash.hash(nutricionist.password)
     db_nutricionist.phone = nutricionist.phone
     db_nutricionist.crn = nutricionist.crn
+    # Clientes antigos nao enviam full_name: so altera quando o campo vier no corpo
+    if "full_name" in nutricionist.model_fields_set:
+        db_nutricionist.full_name = nutricionist.full_name
 
     db.commit()
     db.refresh(db_nutricionist)
@@ -365,6 +510,7 @@ def update_nutricionist(nutricionist_id: int, nutricionist: PostCreateNutricioni
         data={
             "id": db_nutricionist.id,
             "email": db_nutricionist.email,
+            "full_name": db_nutricionist.full_name,
             "phone": db_nutricionist.phone,
             "crn": db_nutricionist.crn
         },
@@ -432,8 +578,12 @@ def unlink_user_nutricionist(user_id: int, nutricionist_CRN: str, db: DbDependen
     if db_nutricionist is None:
         raise HTTPException(status_code=404, detail="Nutricionist not found")
 
-    db_user.nutricionist_id = db_nutricionist.id
-    
+    if db_user.nutricionist_id != db_nutricionist.id:
+        raise HTTPException(status_code=400, detail="User is not linked to this nutricionist")
+
+    # Antes gravava db_nutricionist.id aqui, ou seja, "desvincular" vinculava
+    db_user.nutricionist_id = None
+
     db.commit()
     db.refresh(db_user)
     return ReturnModel(
@@ -452,9 +602,32 @@ def list_user_data_by_nutricionist(nutricionist_id: int, db: DbDependency):
     users = (
         db.query(User)
         .filter(User.nutricionist_id == nutricionist_id)
+        .order_by(User.id)
         .all()
     )
-    return [serialize_user(user) for user in users]
+    balances = get_paired_balances(db, [user.id for user in users])
+    return [serialize_patient(user, balances.get(user.id)) for user in users]
+
+@router.get("/nutricionist/{nutricionist_id}/patients/{user_id}")
+def get_patient(nutricionist_id: int, user_id: int, db: DbDependency):
+    """Details of one patient (a user linked to this nutricionist)."""
+    if db.query(Nutricionist).filter(Nutricionist.id == nutricionist_id).first() is None:
+        raise HTTPException(status_code=404, detail="Nutricionist not found")
+
+    user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .filter(User.nutricionist_id == nutricionist_id)
+        .first()
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    return ReturnModel(
+        message="Patient getted successfully",
+        data=serialize_patient(user, get_paired_balances(db, [user.id]).get(user.id)),
+        success=True,
+    )
 
 # region Allergen
 
@@ -580,52 +753,58 @@ def create_diet(user_id: int, nutricionist_id: int, db: DbDependency, diet: Post
     if diet.user_id != user_id or diet.nutricionist_id != nutricionist_id:
         raise HTTPException(status_code=400, detail="Body user_id/nutricionist_id must match the route parameters")
 
-    new_diet = Diet(
-        name = diet.name,
-        user_id = diet.user_id,
-        nutricionist_id = diet.nutricionist_id,
-        kcal_goal = diet.kcal_goal,
-        fat_goal = diet.fat_goal,
-        carb_goal = diet.carb_goal,
-        protein_goal = diet.protein_goal
-    )
+    if not diet.name or not diet.name.strip():
+        raise HTTPException(status_code=400, detail="Diet name is required")
 
-    db.add(new_diet)
-    db.flush()
+    # Valida tudo antes de gravar qualquer coisa
+    foods = resolve_diet_foods(db, diet.list_foods_ids, diet.user_id)
 
-    foods: List[Food] = []
-    
-    for food_id in diet.list_foods_ids:
-        food = get_visible_food(db, food_id, diet.user_id)
-
-        if food is None:
-            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} dont exist")
-                
-        foods.append(food)
-
-    for new_food in foods:
-        association = DietFoodAssociation(
-            diet_id=new_diet.id,
-            food_id=new_food.id
+    try:
+        new_diet = Diet(
+            name = diet.name.strip(),
+            user_id = diet.user_id,
+            nutricionist_id = diet.nutricionist_id,
+            kcal_goal = diet.kcal_goal,
+            fat_goal = diet.fat_goal,
+            carb_goal = diet.carb_goal,
+            protein_goal = diet.protein_goal
         )
-        db.add(association)
 
-    db.commit()
-    db.refresh(new_diet)
+        db.add(new_diet)
+        db.flush()
+
+        for food in foods:
+            db.add(DietFoodAssociation(diet_id=new_diet.id, food_id=food.id))
+
+        db.commit()
+        db.refresh(new_diet)
+    except IntegrityError:
+        db.rollback()
+        raise
+    except SQLAlchemyError as err:
+        db.rollback()
+        logger.exception("Diet creation failed for user %s", user_id)
+        raise HTTPException(status_code=500, detail="Diet could not be saved") from err
+
     return ReturnModel(
         message = "Diet created successfully",
         data = {
             "diet_id": new_diet.id,
             "diet_name": new_diet.name,
             "user_id": new_diet.user_id,
-            "nutricionist_id": new_diet.nutricionist_id
+            "nutricionist_id": new_diet.nutricionist_id,
+            "kcal_goal": new_diet.kcal_goal,
+            "fat_goal": new_diet.fat_goal,
+            "carb_goal": new_diet.carb_goal,
+            "protein_goal": new_diet.protein_goal,
+            "list_foods_ids": [food.id for food in foods],
         },
         success = True
     )
 
 @router.get("/list_diets_by_user/{user_id}")
 def list_diets_by_user(user_id: int, db: DbDependency):
-    """List all diets associated with a user."""
+    """List all diets associated with a user, with their foods."""
     db_user = db.query(User).filter(User.id == user_id).first()
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -633,9 +812,22 @@ def list_diets_by_user(user_id: int, db: DbDependency):
     diets = (
         db.query(Diet)
         .filter(Diet.user_id == user_id)
+        .order_by(Diet.id)
         .all()
     )
-    return diets
+
+    food_ids: Dict[int, List[int]] = {diet.id: [] for diet in diets}
+    if diets:
+        for diet_id, food_id in (
+            db.query(DietFoodAssociation.diet_id, DietFoodAssociation.food_id)
+            .filter(DietFoodAssociation.diet_id.in_(list(food_ids)))
+            .distinct()
+            .order_by(DietFoodAssociation.diet_id, DietFoodAssociation.food_id)
+            .all()
+        ):
+            food_ids[diet_id].append(food_id)
+
+    return [serialize_diet(diet, food_ids[diet.id]) for diet in diets]
 
 @router.patch("/update_diet/{diet_id}")
 def update_diet(diet_id: int, diet: PostCreateDietBodyRequest, db: DbDependency):
@@ -644,28 +836,33 @@ def update_diet(diet_id: int, diet: PostCreateDietBodyRequest, db: DbDependency)
     if db_diet is None:
         raise HTTPException(status_code=404, detail="Diet not found")
 
-    db_diet.name = diet.name
-    db_diet.kcal_goal = diet.kcal_goal
-    db_diet.fat_goal = diet.fat_goal
-    db_diet.carb_goal = diet.carb_goal
-    db_diet.protein_goal = diet.protein_goal
+    if not diet.name or not diet.name.strip():
+        raise HTTPException(status_code=400, detail="Diet name is required")
 
-    # Remove existing food associations
-    db.query(DietFoodAssociation).filter(DietFoodAssociation.diet_id == diet_id).delete()
+    # Valida os alimentos antes de remover as associacoes atuais
+    foods = resolve_diet_foods(db, diet.list_foods_ids, db_diet.user_id)
 
-    # Add new food associations
-    for food_id in diet.list_foods_ids:
-        food = get_visible_food(db, food_id, db_diet.user_id)
-        if food is None:
-            raise HTTPException(status_code=400, detail=f"Food_id: {food_id} does not exist")
-        association = DietFoodAssociation(
-            diet_id=db_diet.id,
-            food_id=food.id
-        )
-        db.add(association)
+    try:
+        db_diet.name = diet.name.strip()
+        db_diet.kcal_goal = diet.kcal_goal
+        db_diet.fat_goal = diet.fat_goal
+        db_diet.carb_goal = diet.carb_goal
+        db_diet.protein_goal = diet.protein_goal
 
-    db.commit()
-    db.refresh(db_diet)
+        db.query(DietFoodAssociation).filter(DietFoodAssociation.diet_id == diet_id).delete()
+        for food in foods:
+            db.add(DietFoodAssociation(diet_id=db_diet.id, food_id=food.id))
+
+        db.commit()
+        db.refresh(db_diet)
+    except IntegrityError:
+        db.rollback()
+        raise
+    except SQLAlchemyError as err:
+        db.rollback()
+        logger.exception("Diet update failed for diet %s", diet_id)
+        raise HTTPException(status_code=500, detail="Diet could not be saved") from err
+
     return ReturnModel(
         message="Diet updated successfully",
         data={
